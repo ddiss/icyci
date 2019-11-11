@@ -7,6 +7,9 @@ icyCI has one job:
 - Push the results to a Git repository
 
 It differs from other CI utilities in a few ways:
+
+| What?          | How?                                                        |
+| -------------- | ----------------------------------------------------------- |
 | Lightweight    | Single binary with Git and Go standard library dependencies |
 | Secure         | Only proceeds if branch GPG signature can be verified       |
 | Trustless      | Doesn't need push access to source repositories. Rootless.  |
