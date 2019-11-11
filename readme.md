@@ -74,4 +74,7 @@ Future
 License
 -------
 
-icyCI is Free Software, published under the AGPLv3 license.
+icyCI is Free Software, published under the GNU Affero General Public License
+v3.0.
+This license applies to icyCI source itself; it does not affect programs tested
+by icyCI.
