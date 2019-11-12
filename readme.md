@@ -21,41 +21,61 @@ It differs from other CI utilities in a few ways:
 Usage
 -----
 
-Create a new repository to store your test results. This example uses a local
+The example below demonstrates how icyCI can be used to test the Linux kernel.
+
+Import GPG keys used for source repository signing. Only Linus' and Greg's keys
+are imported below:
+```sh
+gpg2 --locate-keys torvalds@kernel.org gregkh@kernel.org
+```
+
+In case you haven't already, ensure that the user running icyCI has
+a git user.name:
+```sh
+git config --global user.name "icyCI"
+```
+
+Create a new repository to store the test results. This example uses a local
 directory, but a remote host could also be used.
-```
-> mkdir ~/icyci-results
-> git init --bare ~/icyci-results
-```
-
-Sign a commit at the HEAD of the branch that you wish to test:
-```
-> git commit -S -m "my signed commit"
-> git push <source repo>
+```sh
+git init --bare ~/icyci-linux-results
 ```
 
-Start icyCI, pointing it at your source repo, a build/test script as well as a
-results repository:
-```
-> icyci -source-repo <source repo> -source-branch <my branch> -results-repo ~/icyci-results -test-script <my build/test program>
+Write a test script. The example below only performs a kernel build:
+```sh
+echo '#!/bin/bash
+      make defconfig && make -j4' > ~/build-linux.sh
+chmod 755 ~/build-linux.sh
 ```
 
-[wait for icyCI to complete]
-
-Add the results repository as a new remote to your checked out source (where
-you signed the commit).
+Start icyCI, pointing it at Linus' mainline kernel repository, the test script
+as well as the results repository:
+```sh
+icyci -source-repo git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git -source-branch master -results-repo ~/icyci-linux-results -test-script ~/build-linux.sh
 ```
-> git remote add icyci-results ~/icyci-results
+
+[Wait for icyCI to complete]
+
+Go to a checkout of the source repository. This can be on any machine with
+access to the source and results repositories:
+```sh
+git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+cd linux
+```
+
+Add the results repository as a new remote to your source repository:
+```sh
+git remote add icyci-results ~/icyci-linux-results
 ```
 
 Fetch the icyCI results:
-```
-> git fetch icyci-results  "refs/notes/*:refs/notes/*"
+```sh
+git fetch icyci-results "refs/notes/*:refs/notes/*"
 ```
 
 The icyCI test results can now be viewed from your source repository alongside
 the regular git log output, with:
-```
+```sh
 git log --show-notes="*"
 ```
 
@@ -63,11 +83,11 @@ git log --show-notes="*"
 Future
 ------
 
-- poll for source repository updates (coming soon)
-- improve documentation
+- Poll for source repository updates (coming soon)
+- Improve documentation
 - Support multiple branches within one instance
 - Save and push build/test artifacts, in addition to output
-- periodically push progress while testing
+- Periodically push progress while testing
 - Your feature; please raise requests via the issue tracker
 
 
