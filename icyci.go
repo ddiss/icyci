@@ -63,7 +63,6 @@ const stderrNotesRef = "refs/notes/icyci.stderr"
 const allNotesGlob = "refs/notes/*"
 
 type cloneCompletion struct {
-	dir string
 	err error
 }
 
@@ -79,15 +78,17 @@ func cloneRepo(ch chan<- cloneCompletion, u *url.URL, branch string,
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
 	if err != nil {
-		log.Fatalf("git failed to start: %v", err)
+		log.Printf("git failed to start: %v", err)
+		goto err_out
 	}
 
 	err = cmd.Wait()
 	if err != nil {
-		log.Fatalf("git %v failed: %v", gitArgs, err)
+		log.Printf("git %v failed: %v", gitArgs, err)
+		goto err_out
 	}
-
-	ch <- cloneCompletion{targetDir, nil}
+err_out:
+	ch <- cloneCompletion{err}
 }
 
 func verifyTag(branch string, tag string) error {
@@ -123,21 +124,22 @@ type verifyCompletion struct {
 }
 
 func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
+	var describeOut bytes.Buffer
+	cmd := exec.Command("git", "describe", "--exact-match", "origin/" + branch)
 
 	// check for a signed tag at HEAD
 	err := os.Chdir(sourceDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("chdir failed: %v", err)
+		goto err_out
 	}
 
-	var describeOut bytes.Buffer
-	gitArgs := []string{"describe", "--exact-match", "origin/" + branch}
-	cmd := exec.Command("git", gitArgs...)
 	cmd.Stdout = &describeOut
 	cmd.Stderr = os.Stderr
 	err = cmd.Start()
 	if err != nil {
-		log.Fatalf("git failed to start: %v", err)
+		log.Printf("git failed to start: %v", err)
+		goto err_out
 	}
 
 	err = cmd.Wait()
@@ -146,19 +148,21 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 		tag := string(describeOut.Bytes())
 		err = verifyTag(branch, tag)
 		if err != nil {
-			log.Fatalf("GPG verification of tag %s at origin/%s failed",
+			log.Printf("GPG verification of tag %s at origin/%s failed",
 				tag, branch)
+			goto err_out
 		}
 	} else {
 		// XXX should ignore merge commits?
 		err = verifyCommit(branch)
 		if err != nil {
-			log.Fatalf("GPG verification of commit at origin/%s failed",
+			log.Printf("GPG verification of commit at origin/%s failed",
 				branch)
+			goto err_out
 		}
 	}
-
-	ch <- verifyCompletion{nil}
+err_out:
+	ch <- verifyCompletion{err}
 }
 
 type runScriptCompletion struct {
@@ -169,46 +173,52 @@ type runScriptCompletion struct {
 
 func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	branch string, testScript string) {
+	var stdoutF *os.File
+	var stderrF *os.File
+	cmpl := runScriptCompletion{}
+
+	cmd := exec.Command("git", "checkout", "--quiet", "origin/" + branch)
 
 	err := os.Chdir(sourceDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("chdir failed: %v", err)
+		goto err_out
 	}
 
-	// TODO probably makes sense to checkout in separate fn
-	gitArgs := []string{"checkout", "--quiet", "origin/" + branch}
-	cmd := exec.Command("git", gitArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Start()
 	if err != nil {
-		log.Fatalf("git failed to start: %v", err)
+		log.Printf("git failed to start: %v", err)
+		goto err_out
 	}
 
 	err = cmd.Wait()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("git failed: %v", err)
+		goto err_out
 	}
 
-	cmpl := runScriptCompletion{}
-
 	cmpl.stdoutFile = path.Join(workDir, "script.stdout")
-	stdoutF, err := os.Create(cmpl.stdoutFile)
+	stdoutF, err = os.Create(cmpl.stdoutFile)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("stdout log creation failed: %v", err)
+		goto err_out
 	}
 	defer stdoutF.Close()
 
 	cmpl.stderrFile = path.Join(workDir, "script.stderr")
-	stderrF, err := os.Create(cmpl.stderrFile)
+	stderrF, err = os.Create(cmpl.stderrFile)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("stderr log creation failed: %v", err)
+		goto err_out
 	}
 	defer stderrF.Close()
 
 	err = os.Chdir(sourceDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("chdir failed: %v", err)
+		goto err_out
 	}
 
 	cmd = exec.Command(testScript)
@@ -216,7 +226,8 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	cmd.Stderr = stderrF
 	err = cmd.Start()
 	if err != nil {
-		log.Fatalf("git failed to start: %v", err)
+		log.Printf("test %s failed to start: %v", testScript, err)
+		goto err_out
 	}
 
 	cmpl.err = cmd.Wait()
@@ -224,6 +235,9 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	stderrF.Sync()
 
 	ch <- cmpl
+	return
+err_out:
+	ch <- runScriptCompletion{"", "", err}
 }
 
 type notesOut struct {
@@ -240,7 +254,8 @@ func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 
 	err := os.Chdir(sourceDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("chdir failed: %v", err)
+		goto err_out
 	}
 
 	for _, outa := range []notesOut{{ns: stdoutNotesRef, f: stdoutFile},
@@ -251,16 +266,18 @@ func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err := cmd.Start()
 		if err != nil {
-			log.Fatalf("git failed to start: %v", err)
+			log.Printf("git failed to start: %v", err)
+			goto err_out
 		}
 
 		err = cmd.Wait()
 		if err != nil {
-			log.Fatalf("git %v failed: %v", gitArgs, err)
+			log.Printf("git %v failed: %v", gitArgs, err)
+			goto err_out
 		}
 	}
-
-	ch <- addNotesCompletion{nil}
+err_out:
+	ch <- addNotesCompletion{err}
 }
 
 type pushResultsCompletion struct {
@@ -273,26 +290,28 @@ type pushResultsCompletion struct {
 // missing commits referenced by the notes.
 func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
 	branch string, u *url.URL) {
+	cmd := exec.Command("git", "push", u.String(), allNotesGlob)
 
 	err := os.Chdir(sourceDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("chdir failed: %v", err)
+		goto err_out
 	}
 
-	gitArgs := []string{"push", u.String(), allNotesGlob}
-	cmd := exec.Command("git", gitArgs...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err = cmd.Start()
 	if err != nil {
-		log.Fatalf("git failed to start: %v", err)
+		log.Printf("git failed to start: %v", err)
+		goto err_out
 	}
 
 	err = cmd.Wait()
 	if err != nil {
-		log.Fatalf("git %v failed: %v", gitArgs, err)
+		log.Printf("git failed: %v", err)
+		goto err_out
 	}
-
-	ch <- pushResultsCompletion{nil}
+err_out:
+	ch <- pushResultsCompletion{err}
 }
 
 type cleanupCompletion struct {
@@ -300,26 +319,28 @@ type cleanupCompletion struct {
 }
 
 func cleanupSource(ch chan<- cleanupCompletion, sourceDir string) {
+	cmd := exec.Command("git", "clean","-fxd")
 
 	err := os.Chdir(sourceDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("chdir failed: %v", err)
+		goto err_out
 	}
 
-	gitArgs := []string{"clean","-fxd"}
-	cmd := exec.Command("git", gitArgs...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err = cmd.Start()
 	if err != nil {
-		log.Fatalf("git failed to start: %v", err)
+		log.Printf("git failed to start: %v", err)
+		goto err_out
 	}
 
 	err = cmd.Wait()
 	if err != nil {
-		log.Fatalf("git %v failed: %v", gitArgs, err)
+		log.Printf("git failed: %v", err)
+		goto err_out
 	}
-
-	ch <- cleanupCompletion{nil}
+err_out:
+	ch <- cleanupCompletion{err}
 }
 
 func transitionState(newState State, curState *State,
