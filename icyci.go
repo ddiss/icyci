@@ -125,7 +125,7 @@ type verifyCompletion struct {
 
 func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 	var describeOut bytes.Buffer
-	cmd := exec.Command("git", "describe", "--exact-match", "origin/" + branch)
+	cmd := exec.Command("git", "describe", "--exact-match", "origin/"+branch)
 
 	// check for a signed tag at HEAD
 	err := os.Chdir(sourceDir)
@@ -166,9 +166,10 @@ err_out:
 }
 
 type runScriptCompletion struct {
-	stdoutFile string
-	stderrFile string
-	err        error
+	stdoutFile   string
+	stderrFile   string
+	scriptStatus error
+	err          error
 }
 
 func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
@@ -177,7 +178,7 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	var stderrF *os.File
 	cmpl := runScriptCompletion{}
 
-	cmd := exec.Command("git", "checkout", "--quiet", "origin/" + branch)
+	cmd := exec.Command("git", "checkout", "--quiet", "origin/"+branch)
 
 	err := os.Chdir(sourceDir)
 	if err != nil {
@@ -230,19 +231,23 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 		goto err_out
 	}
 
-	cmpl.err = cmd.Wait()
+	cmpl.scriptStatus = cmd.Wait()
 	stdoutF.Sync()
 	stderrF.Sync()
 
 	ch <- cmpl
 	return
 err_out:
-	ch <- runScriptCompletion{"", "", err}
+	ch <- runScriptCompletion{
+		stdoutFile: "",
+		stderrFile: "",
+		scriptStatus: err,
+		err: err}
 }
 
 type notesOut struct {
-	f  string
 	ns string
+	msg  string
 }
 
 type addNotesCompletion struct {
@@ -258,10 +263,12 @@ func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 		goto err_out
 	}
 
-	for _, outa := range []notesOut{{ns: stdoutNotesRef, f: stdoutFile},
-		{ns: stderrNotesRef, f: stderrFile}} {
-		gitArgs := []string{"notes", "--ref", outa.ns, "append",
-			"--allow-empty", "-F", outa.f, "origin/" + branch}
+	for _, note := range []notesOut{
+		{ns: stdoutNotesRef, msg: stdoutFile},
+		{ns: stderrNotesRef, msg: stderrFile}} {
+
+		gitArgs := []string{"notes", "--ref", note.ns, "append",
+			"--allow-empty", "-F", note.msg, "origin/" + branch}
 		cmd := exec.Command("git", gitArgs...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err := cmd.Start()
@@ -319,7 +326,7 @@ type cleanupCompletion struct {
 }
 
 func cleanupSource(ch chan<- cleanupCompletion, sourceDir string) {
-	cmd := exec.Command("git", "clean","-fxd")
+	cmd := exec.Command("git", "clean", "-fxd")
 
 	err := os.Chdir(sourceDir)
 	if err != nil {
@@ -344,7 +351,7 @@ err_out:
 }
 
 func transitionState(newState State, curState *State,
-			stateTransTimer *time.Timer) {
+	stateTransTimer *time.Timer) {
 	log.Printf("transitioning from state %d: %s -> %d: %s\n",
 		*curState, states[*curState].desc,
 		newState, states[newState].desc)
@@ -406,7 +413,12 @@ func eventLoop(params *cliParams, workDir string) {
 			if runScriptCmpl.err != nil {
 				log.Fatal(runScriptCmpl.err)
 			}
-			log.Printf("test script completed successfully\n")
+			if runScriptCmpl.scriptStatus == nil {
+				log.Printf("test script completed successfully\n")
+			} else {
+				log.Printf("test script failed: %v\n",
+					runScriptCmpl.scriptStatus)
+			}
 
 			transitionState(save, &state, stateTransTimer)
 			go func() {
