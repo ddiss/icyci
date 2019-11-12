@@ -125,7 +125,8 @@ type verifyCompletion struct {
 
 func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 	var describeOut bytes.Buffer
-	cmd := exec.Command("git", "describe", "--exact-match", "origin/"+branch)
+	cmd := exec.Command("git", "describe", "--tags", "--exact-match",
+		"origin/"+branch)
 
 	// check for a signed tag at HEAD
 	err := os.Chdir(sourceDir)
@@ -144,8 +145,10 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 
 	err = cmd.Wait()
 	if err == nil {
-		// XXX what happens if there are two tags at HEAD?
-		tag := string(describeOut.Bytes())
+		// if there are >=2 tags at HEAD, git-describe outputs only one.
+		// If both unsigned and signed tags exist, git-describe outputs
+		// a signed tag.
+		tag := string(bytes.TrimRight(describeOut.Bytes(), "\n"))
 		err = verifyTag(branch, tag)
 		if err != nil {
 			log.Printf("GPG verification of tag %s at origin/%s failed",
