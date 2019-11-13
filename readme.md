@@ -56,25 +56,25 @@ icyci -source-repo git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.
 
 [Wait for icyCI to complete]
 
-Go to a checkout of the source repository. This can be on any machine with
-access to the source and results repositories:
+To view the test script results, you can either do a fresh clone of the
+*results-repo*:
 ```sh
-git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+git clone ~/icyci-linux-results ~/linux-results
+cd ~/linux-results
+git fetch origin "refs/notes/*:refs/notes/*"
+```
+
+or alternatively add the *results-repo* as a new remote to an existing clone
+of the *source-repo*:
+```sh
+# The linux directory is an existing clone of
+# git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 cd linux
-```
-
-Add the results repository as a new remote to your source repository:
-```sh
 git remote add icyci-results ~/icyci-linux-results
-```
-
-Fetch the icyCI results:
-```sh
 git fetch icyci-results "refs/notes/*:refs/notes/*"
 ```
 
-The icyCI test results can now be viewed from your source repository alongside
-the regular git log output, with:
+The icyCI test results can be viewed alongside the regular git log output with:
 ```sh
 git log --show-notes="*"
 ```
