@@ -95,8 +95,7 @@ err_out:
 func verifyTag(branch string, tag string) error {
 	log.Printf("GPG verifying tag %s at origin/%s", tag, branch)
 
-	gitArgs := []string{"tag", "--verify", tag}
-	cmd := exec.Command("git", gitArgs...)
+	cmd := exec.Command("git", "tag", "--verify", tag)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
 	if err != nil {
@@ -109,8 +108,7 @@ func verifyTag(branch string, tag string) error {
 func verifyCommit(branch string) error {
 	log.Printf("GPG verifying commit at origin/%s HEAD\n", branch)
 
-	gitArgs := []string{"verify-commit", "origin/" + branch}
-	cmd := exec.Command("git", gitArgs...)
+	cmd := exec.Command("git", "verify-commit", "origin/"+branch)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
 	if err != nil {
