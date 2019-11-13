@@ -29,6 +29,7 @@ type cliParams struct {
 	testScript    string
 	resultsUrl    *url.URL
 	resultsBranch string
+	pushBranch    bool
 }
 
 type State int
@@ -295,12 +296,14 @@ type pushResultsCompletion struct {
 }
 
 // push captured stdout and stderr notes to the results repository.
-// The corresponding source branch is *not* pushed, so cloning the results
-// repository only (if different to source) may lead to confusion due to the
-// missing commits referenced by the notes.
 func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
-	branch string, u *url.URL) {
-	cmd := exec.Command("git", "push", u.String(), allNotesGlob)
+	branch string, u *url.URL, pushBranch bool) {
+
+	headRef := ""
+	if pushBranch {
+		headRef = "refs/heads/"+branch
+	}
+	cmd := exec.Command("git", "push", u.String(), allNotesGlob, headRef)
 
 	err := os.Chdir(sourceDir)
 	if err != nil {
@@ -439,7 +442,8 @@ func eventLoop(params *cliParams, workDir string) {
 			transitionState(push, &state, stateTransTimer)
 			go func() {
 				pushResults(pushResultsChan, sourceDir,
-					params.sourceBranch, params.resultsUrl)
+					params.sourceBranch, params.resultsUrl,
+					params.pushBranch)
 			}()
 		case pushResultsCmpl := <-pushResultsChan:
 			if pushResultsCmpl.err != nil {
@@ -480,6 +484,11 @@ func main() {
 		"Test script path, relative to source-repo or absolute (required)")
 	flag.StringVar(&resultsRawUrl, "results-repo", "",
 		"Git URL to push test results to (optional)")
+	// If the corresponding source branch is not pushed, then cloning the
+	// results repository only (if different to source) may lead to
+	// confusion due to the missing commits referenced by the notes.
+	flag.BoolVar(&params.pushBranch, "push-branch", true,
+		"Push the source branch to results-repo, in addition to notes")
 	flag.Parse()
 
 	if sourceRawUrl == "" || params.testScript == "" {
