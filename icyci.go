@@ -67,8 +67,8 @@ type cloneCompletion struct {
 	err error
 }
 
-func cloneRepo(ch chan<- cloneCompletion, u *url.URL, branch string,
-	targetDir string) {
+func cloneRepo(ch chan<- cloneCompletion, workDir string, u *url.URL,
+	branch string, targetDir string) {
 	// TODO branch is not sanitized. Ignore submodules for now.
 	if branch == "" {
 		log.Fatal("empty branch name")
@@ -76,6 +76,7 @@ func cloneRepo(ch chan<- cloneCompletion, u *url.URL, branch string,
 	gitArgs := []string{"clone", "--no-checkout", "--single-branch",
 		"--branch", branch, u.String(), targetDir}
 	cmd := exec.Command("git", gitArgs...)
+	cmd.Dir = workDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
 	if err != nil {
@@ -92,10 +93,11 @@ err_out:
 	ch <- cloneCompletion{err}
 }
 
-func verifyTag(branch string, tag string) error {
+func verifyTag(sourceDir string, branch string, tag string) error {
 	log.Printf("GPG verifying tag %s at origin/%s", tag, branch)
 
 	cmd := exec.Command("git", "tag", "--verify", tag)
+	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
 	if err != nil {
@@ -105,10 +107,11 @@ func verifyTag(branch string, tag string) error {
 	return cmd.Wait()
 }
 
-func verifyCommit(branch string) error {
+func verifyCommit(sourceDir string, branch string) error {
 	log.Printf("GPG verifying commit at origin/%s HEAD\n", branch)
 
 	cmd := exec.Command("git", "verify-commit", "origin/"+branch)
+	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
 	if err != nil {
@@ -122,21 +125,15 @@ type verifyCompletion struct {
 	err error
 }
 
+// check for a signed tag or commit at HEAD
 func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 	var describeOut bytes.Buffer
 	cmd := exec.Command("git", "describe", "--tags", "--exact-match",
 		"origin/"+branch)
-
-	// check for a signed tag at HEAD
-	err := os.Chdir(sourceDir)
-	if err != nil {
-		log.Printf("chdir failed: %v", err)
-		goto err_out
-	}
-
+	cmd.Dir = sourceDir
 	cmd.Stdout = &describeOut
 	cmd.Stderr = os.Stderr
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		log.Printf("git failed to start: %v", err)
 		goto err_out
@@ -148,7 +145,7 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 		// If both unsigned and signed tags exist, git-describe outputs
 		// a signed tag.
 		tag := string(bytes.TrimRight(describeOut.Bytes(), "\n"))
-		err = verifyTag(branch, tag)
+		err = verifyTag(sourceDir, branch, tag)
 		if err != nil {
 			log.Printf("GPG verification of tag %s at origin/%s failed",
 				tag, branch)
@@ -156,7 +153,7 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 		}
 	} else {
 		// XXX should ignore merge commits?
-		err = verifyCommit(branch)
+		err = verifyCommit(sourceDir, branch)
 		if err != nil {
 			log.Printf("GPG verification of commit at origin/%s failed",
 				branch)
@@ -181,16 +178,10 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	cmpl := runScriptCompletion{}
 
 	cmd := exec.Command("git", "checkout", "--quiet", "origin/"+branch)
-
-	err := os.Chdir(sourceDir)
-	if err != nil {
-		log.Printf("chdir failed: %v", err)
-		goto err_out
-	}
-
+	cmd.Dir = sourceDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		log.Printf("git failed to start: %v", err)
 		goto err_out
@@ -218,13 +209,8 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	}
 	defer stderrF.Close()
 
-	err = os.Chdir(sourceDir)
-	if err != nil {
-		log.Printf("chdir failed: %v", err)
-		goto err_out
-	}
-
 	cmd = exec.Command(testScript)
+	cmd.Dir = sourceDir
 	cmd.Stdout = stdoutF
 	cmd.Stderr = stderrF
 	err = cmd.Start()
@@ -259,12 +245,7 @@ type addNotesCompletion struct {
 func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 	stdoutFile string, stderrFile string) {
 
-	err := os.Chdir(sourceDir)
-	if err != nil {
-		log.Printf("chdir failed: %v", err)
-		goto err_out
-	}
-
+	var err error = nil
 	for _, note := range []notesOut{
 		{ns: stdoutNotesRef, msg: stdoutFile},
 		{ns: stderrNotesRef, msg: stderrFile}} {
@@ -272,8 +253,9 @@ func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 		gitArgs := []string{"notes", "--ref", note.ns, "append",
 			"--allow-empty", "-F", note.msg, "origin/" + branch}
 		cmd := exec.Command("git", gitArgs...)
+		cmd.Dir = sourceDir
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		err := cmd.Start()
+		err = cmd.Start()
 		if err != nil {
 			log.Printf("git failed to start: %v", err)
 			goto err_out
@@ -302,15 +284,9 @@ func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
 		headRef = "refs/heads/"+branch
 	}
 	cmd := exec.Command("git", "push", u.String(), allNotesGlob, headRef)
-
-	err := os.Chdir(sourceDir)
-	if err != nil {
-		log.Printf("chdir failed: %v", err)
-		goto err_out
-	}
-
+	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		log.Printf("git failed to start: %v", err)
 		goto err_out
@@ -331,15 +307,9 @@ type cleanupCompletion struct {
 
 func cleanupSource(ch chan<- cleanupCompletion, sourceDir string) {
 	cmd := exec.Command("git", "clean", "-fxd")
-
-	err := os.Chdir(sourceDir)
-	if err != nil {
-		log.Printf("chdir failed: %v", err)
-		goto err_out
-	}
-
+	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		log.Printf("git failed to start: %v", err)
 		goto err_out
@@ -385,8 +355,8 @@ func eventLoop(params *cliParams, workDir string) {
 	stateTransTimer := time.NewTimer(time.Duration(0))
 	transitionState(clone, &state, stateTransTimer)
 	go func() {
-		cloneRepo(cloneChan, params.sourceUrl, params.sourceBranch,
-			sourceDir)
+		cloneRepo(cloneChan, workDir, params.sourceUrl,
+			params.sourceBranch, sourceDir)
 	}()
 
 	for {
