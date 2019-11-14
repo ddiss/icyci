@@ -111,7 +111,7 @@ func verifyTag(sourceDir string, branch string, tag string) error {
 }
 
 func verifyCommit(sourceDir string, branch string) error {
-	log.Printf("GPG verifying commit at origin/%s HEAD\n", branch)
+	log.Printf("GPG verifying commit at origin/%s tip\n", branch)
 
 	cmd := exec.Command("git", "verify-commit", "origin/"+branch)
 	cmd.Dir = sourceDir
@@ -128,7 +128,7 @@ type verifyCompletion struct {
 	err error
 }
 
-// check for a signed tag or commit at HEAD
+// check for a signed tag or commit at branch tip
 func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 	var describeOut bytes.Buffer
 	cmd := exec.Command("git", "describe", "--tags", "--exact-match",
@@ -155,7 +155,6 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 			goto err_out
 		}
 	} else {
-		// XXX should ignore merge commits?
 		err = verifyCommit(sourceDir, branch)
 		if err != nil {
 			log.Printf("GPG verification of commit at origin/%s failed",
@@ -507,7 +506,7 @@ func eventLoop(params *cliParams, workDir string) {
 			if addNotesCmpl.err != nil {
 				log.Fatal(addNotesCmpl.err)
 			}
-			log.Printf("git notes completed successfully\n")
+			log.Printf("git notes added successfully\n")
 
 			transitionState(push, &state, stateTransTimer)
 			go func() {
