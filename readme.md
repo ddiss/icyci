@@ -2,9 +2,10 @@ icyCI
 =====
 
 icyCI has one job:
-- Pull code from a Git repository
+- Pull source from a Git repository
 - Run a build/test/whatever script
-- Push the results to a Git repository
+- Push script results to a Git repository
+- Poll for new source changes
 
 It differs from other CI utilities in a few ways:
 
@@ -16,6 +17,7 @@ It differs from other CI utilities in a few ways:
 | Vendor Neutral | Only relies on standard Git features and protocols          |
 | Fast           | Asynchronous, event based architecture                      |
 | Informative    | Results published as git-notes, viewable from git log       |
+| Simple         | Set and forget. Polls and tests new changes automatically.  |
 
 
 Usage
@@ -83,11 +85,11 @@ git log --show-notes="*"
 Future
 ------
 
-- Poll for source repository updates (coming soon)
 - Improve documentation
 - Support multiple branches within one instance
 - Save and push build/test artifacts, in addition to output
 - Periodically push progress while testing
+- Support multiple concurrent instances tracking the same source
 - Your feature; please raise requests via the issue tracker
 
 
