@@ -30,6 +30,7 @@ type cliParams struct {
 	resultsUrl    *url.URL
 	resultsBranch string
 	pushBranch    bool
+	pollIntervalS uint64
 }
 
 type State int
@@ -42,6 +43,7 @@ const (
 	save
 	push
 	cleanup
+	poll
 )
 
 type stateDesc struct {
@@ -57,6 +59,7 @@ var states = map[State]stateDesc{
 	save:    {"save test output as git notes", time.Duration(1 * time.Minute)},
 	push:    {"push test output notes", time.Duration(1 * time.Minute)},
 	cleanup: {"cleanup test artifacts", time.Duration(1 * time.Minute)},
+	poll:    {"poll source for new commits", time.Duration(0)},
 }
 
 const stdoutNotesRef = "refs/notes/icyci.stdout"
@@ -324,6 +327,88 @@ err_out:
 	ch <- cleanupCompletion{err}
 }
 
+func pollGetRev(sourceDir string, branch string) (string, error) {
+	var revParseOut bytes.Buffer
+	curRev := ""
+
+	cmd := exec.Command("git", "rev-parse", "origin/"+branch)
+	cmd.Dir = sourceDir
+	cmd.Stdout = &revParseOut
+	cmd.Stderr = os.Stderr
+	err := cmd.Start()
+	if err != nil {
+		log.Printf("git failed to start: %v", err)
+		goto err_out
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		log.Print("git rev-parse failed: %v\n", err)
+		goto err_out
+	}
+
+	curRev = string(bytes.TrimRight(revParseOut.Bytes(), "\n"))
+err_out:
+	return curRev, err
+}
+
+func pollFetch(sourceDir string, branch string) error {
+	cmd := exec.Command("git", "fetch", "origin")
+	cmd.Dir = sourceDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Start()
+	if err != nil {
+		log.Printf("git failed to start: %v", err)
+		goto err_out
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		log.Print("git fetch failed: %v\n", err)
+		goto err_out
+	}
+err_out:
+	return err
+}
+
+type pollCompletion struct {
+	err error
+}
+
+func pollSource(ch chan<- pollCompletion, sourceDir string, branch string,
+	pollIntervalS uint64) {
+
+	var err error = nil
+	for {
+		preFetchRev, err := pollGetRev(sourceDir, branch)
+		if err != nil {
+			log.Print("failed to get pre-fetch revision: %v\n", err)
+			break
+		}
+
+		time.Sleep(time.Duration(time.Duration(pollIntervalS) * time.Second))
+
+		err = pollFetch(sourceDir, branch)
+		if err != nil {
+			// TODO add retry logic if the server doesn't respond
+			break
+		}
+
+		postFetchRev, err := pollGetRev(sourceDir, branch)
+		if err != nil {
+			break
+		}
+		if preFetchRev != postFetchRev {
+			log.Printf("detected branch %s change %s -> %s\n",
+				branch, preFetchRev, postFetchRev)
+			break
+		}
+	}
+
+	ch <- pollCompletion{err}
+}
+
 func transitionState(newState State, curState *State,
 	stateTransTimer *time.Timer) {
 	log.Printf("transitioning from state %d: %s -> %d: %s\n",
@@ -334,6 +419,10 @@ func transitionState(newState State, curState *State,
 
 	if !stateTransTimer.Stop() {
 		<-stateTransTimer.C
+	}
+	if states[newState].timeout == time.Duration(0) {
+		log.Printf("state %d doesn't timeout", newState)
+		return
 	}
 	stateTransTimer.Reset(states[newState].timeout)
 }
@@ -350,6 +439,7 @@ func eventLoop(params *cliParams, workDir string) {
 	addNotesChan := make(chan addNotesCompletion)
 	pushResultsChan := make(chan pushResultsCompletion)
 	cleanupChan := make(chan cleanupCompletion)
+	pollChan := make(chan pollCompletion)
 
 	state := uninit
 	stateTransTimer := time.NewTimer(time.Duration(0))
@@ -429,8 +519,23 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("cleanup completed successfully\n")
 
-			// all done. TODO: poll for updates
-			return
+			transitionState(poll, &state, stateTransTimer)
+			go func() {
+				pollSource(pollChan, sourceDir,
+					params.sourceBranch,
+					params.pollIntervalS)
+			}()
+		case pollCmpl := <-pollChan:
+			if pollCmpl.err != nil {
+				log.Fatal(pollCmpl.err)
+			}
+			log.Printf("poll / fetch loop returned success\n")
+
+			transitionState(verify, &state, stateTransTimer)
+			go func() {
+				verifyRepo(verifyChan, sourceDir,
+					params.sourceBranch)
+			}()
 		case <-stateTransTimer.C:
 			log.Fatalf("State %v transition timeout!", state)
 		}
@@ -457,6 +562,8 @@ func main() {
 	// confusion due to the missing commits referenced by the notes.
 	flag.BoolVar(&params.pushBranch, "push-branch", true,
 		"Push the source branch to results-repo, in addition to notes")
+	flag.Uint64Var(&params.pollIntervalS, "poll-interval", 60,
+		"While idle, poll source-repo for changes at this interval")
 	flag.Parse()
 
 	if sourceRawUrl == "" || params.testScript == "" {
