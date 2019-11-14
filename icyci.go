@@ -380,6 +380,7 @@ func pollSource(ch chan<- pollCompletion, sourceDir string, branch string,
 	pollIntervalS uint64) {
 
 	var err error = nil
+	log.Print("Entering poll loop awaiting new source commits\n")
 	for {
 		preFetchRev, err := pollGetRev(sourceDir, branch)
 		if err != nil {
@@ -464,7 +465,14 @@ func eventLoop(params *cliParams, workDir string) {
 			}()
 		case verifyCmpl := <-verifyChan:
 			if verifyCmpl.err != nil {
-				log.Fatal(verifyCmpl.err)
+				log.Printf("verify failed: %v\n",
+					verifyCmpl.err)
+				transitionState(poll, &state, stateTransTimer)
+				go func() {
+					pollSource(pollChan, sourceDir,
+						params.sourceBranch,
+						params.pollIntervalS)
+				}()
 			}
 			log.Printf("verify completed successfully\n")
 
