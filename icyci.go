@@ -284,7 +284,7 @@ func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
 
 	headRef := ""
 	if pushBranch {
-		headRef = "refs/heads/"+branch
+		headRef = "HEAD:refs/heads/"+branch
 	}
 	cmd := exec.Command("git", "push", u.String(), allNotesGlob, headRef)
 	cmd.Dir = sourceDir
