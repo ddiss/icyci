@@ -309,7 +309,7 @@ type cleanupCompletion struct {
 }
 
 func cleanupSource(ch chan<- cleanupCompletion, sourceDir string) {
-	cmd := exec.Command("git", "clean", "-fxd")
+	cmd := exec.Command("git", "clean", "--quiet", "--force", "-xd")
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
