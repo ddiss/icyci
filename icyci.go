@@ -419,7 +419,11 @@ func transitionState(newState State, curState *State,
 	*curState = newState
 
 	if !stateTransTimer.Stop() {
-		<-stateTransTimer.C
+		// select + default to avoid deadlock when already stopped
+		select {
+		case <-stateTransTimer.C:
+		default:
+		}
 	}
 	if states[newState].timeout == time.Duration(0) {
 		log.Printf("state %d doesn't timeout", newState)
