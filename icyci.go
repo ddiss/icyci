@@ -379,21 +379,31 @@ func pollSource(ch chan<- pollCompletion, sourceDir string, branch string,
 	pollIntervalS uint64) {
 
 	var err error = nil
-	log.Print("Entering poll loop awaiting new source commits\n")
-	for {
-		preFetchRev, err := pollGetRev(sourceDir, branch)
-		if err != nil {
-			log.Print("failed to get pre-fetch revision: %v\n", err)
-			break
-		}
+	consecutiveFetchFail := 0
+	const maxConsecutiveFetchFails = 10
 
+	preFetchRev, err := pollGetRev(sourceDir, branch)
+	if err != nil {
+		log.Print("failed to get pre-fetch revision: %v\n", err)
+		goto err_out
+	}
+	log.Printf("Entering poll loop awaiting new %s commits at %s\n",
+		preFetchRev)
+
+	for {
 		time.Sleep(time.Duration(time.Duration(pollIntervalS) * time.Second))
 
 		err = pollFetch(sourceDir, branch)
 		if err != nil {
-			// TODO add retry logic if the server doesn't respond
-			break
+			consecutiveFetchFail++
+			if consecutiveFetchFail > maxConsecutiveFetchFails {
+				break
+			}
+			log.Printf("Retrying; %d of maximum %d fetch failures\n",
+				consecutiveFetchFail, maxConsecutiveFetchFails)
+			continue
 		}
+		consecutiveFetchFail = 0
 
 		postFetchRev, err := pollGetRev(sourceDir, branch)
 		if err != nil {
@@ -405,7 +415,7 @@ func pollSource(ch chan<- pollCompletion, sourceDir string, branch string,
 			break
 		}
 	}
-
+err_out:
 	ch <- pollCompletion{err}
 }
 
