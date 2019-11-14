@@ -253,7 +253,7 @@ func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 		{ns: stdoutNotesRef, msg: stdoutFile},
 		{ns: stderrNotesRef, msg: stderrFile}} {
 
-		gitArgs := []string{"notes", "--ref", note.ns, "append",
+		gitArgs := []string{"notes", "--ref", note.ns, "add",
 			"--allow-empty", "-F", note.msg, "origin/" + branch}
 		cmd := exec.Command("git", gitArgs...)
 		cmd.Dir = sourceDir
