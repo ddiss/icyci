@@ -24,13 +24,13 @@ func usage() {
 }
 
 type cliParams struct {
-	sourceUrl     *url.URL
-	sourceBranch  string
-	testScript    string
-	resultsUrl    *url.URL
-	resultsBranch string
-	pushBranch    bool
-	pollIntervalS uint64
+	sourceUrl      *url.URL
+	sourceBranch   string
+	testScript     string
+	resultsUrl     *url.URL
+	resultsBranch  string
+	pushSrcToRslts bool
+	pollIntervalS  uint64
 }
 
 type State int
@@ -49,6 +49,7 @@ const (
 type loopState struct {
 	state           State
 	transitionTimer *time.Timer
+	verifiedTag     string
 }
 
 type stateDesc struct {
@@ -131,10 +132,12 @@ func verifyCommit(sourceDir string, branch string) error {
 
 type verifyCompletion struct {
 	err error
+	tag string
 }
 
 // check for a signed tag or commit at branch tip
 func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
+	tag := ""
 	var describeOut bytes.Buffer
 	cmd := exec.Command("git", "describe", "--tags", "--exact-match",
 		"origin/"+branch)
@@ -152,7 +155,7 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 		// if there are >=2 tags at HEAD, git-describe outputs only one.
 		// If both unsigned and signed tags exist, git-describe outputs
 		// a signed tag.
-		tag := string(bytes.TrimRight(describeOut.Bytes(), "\n"))
+		tag = string(bytes.TrimRight(describeOut.Bytes(), "\n"))
 		err = verifyTag(sourceDir, branch, tag)
 		if err != nil {
 			log.Printf("GPG verification of tag %s at origin/%s failed",
@@ -168,7 +171,7 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 		}
 	}
 err_out:
-	ch <- verifyCompletion{err}
+	ch <- verifyCompletion{err, tag}
 }
 
 type runScriptCompletion struct {
@@ -284,13 +287,16 @@ type pushResultsCompletion struct {
 
 // push captured stdout and stderr notes to the results repository.
 func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
-	branch string, u *url.URL, pushBranch bool) {
+	branch string, tag string, u *url.URL, pushSrcToRslts bool) {
 
-	headRef := ""
-	if pushBranch {
-		headRef = "HEAD:refs/heads/" + branch
+	gitArgs := []string{"push", u.String(), allNotesGlob}
+	if pushSrcToRslts {
+		gitArgs = append(gitArgs, "HEAD:refs/heads/"+branch)
+		if tag != "" {
+			gitArgs = append(gitArgs, "refs/tags/"+tag)
+		}
 	}
-	cmd := exec.Command("git", "push", u.String(), allNotesGlob, headRef)
+	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Start()
@@ -483,6 +489,7 @@ func eventLoop(params *cliParams, workDir string) {
 					params.sourceBranch)
 			}()
 		case verifyCmpl := <-verifyChan:
+			ls.verifiedTag = ""
 			if verifyCmpl.err != nil {
 				log.Printf("verify failed: %v\n",
 					verifyCmpl.err)
@@ -495,6 +502,7 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("verify completed successfully\n")
 
+			ls.verifiedTag = verifyCmpl.tag
 			transitionState(run, &ls)
 			go func() {
 				runScript(runScriptChan, workDir, sourceDir,
@@ -527,8 +535,8 @@ func eventLoop(params *cliParams, workDir string) {
 			transitionState(push, &ls)
 			go func() {
 				pushResults(pushResultsChan, sourceDir,
-					params.sourceBranch, params.resultsUrl,
-					params.pushBranch)
+					params.sourceBranch, ls.verifiedTag,
+					params.resultsUrl, params.pushSrcToRslts)
 			}()
 		case pushResultsCmpl := <-pushResultsChan:
 			if pushResultsCmpl.err != nil {
@@ -587,8 +595,8 @@ func main() {
 	// If the corresponding source branch is not pushed, then cloning the
 	// results repository only (if different to source) may lead to
 	// confusion due to the missing commits referenced by the notes.
-	flag.BoolVar(&params.pushBranch, "push-branch", true,
-		"Push the source branch to results-repo, in addition to notes")
+	flag.BoolVar(&params.pushSrcToRslts, "push-source-to-results", true,
+		"Push source-branch and any tag to results-repo, in addition to notes")
 	flag.Uint64Var(&params.pollIntervalS, "poll-interval", 60,
 		"While idle, poll source-repo for changes at this interval")
 	flag.Parse()
