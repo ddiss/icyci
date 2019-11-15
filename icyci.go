@@ -557,46 +557,44 @@ func eventLoop(params *cliParams, workDir string) {
 }
 
 func main() {
-	var sourceRawUrl string
+	var srcRawUrl string
 	var resultsRawUrl string
 	var err error
 
 	params := new(cliParams)
 	flag.Usage = usage
-	flag.StringVar(&sourceRawUrl, "source-repo", "",
-		"Git URL for the repository under test (required)")
+	flag.StringVar(&srcRawUrl, "source-repo", "",
+		"Git `URL` for the repository under test (required)")
 	flag.StringVar(&params.sourceBranch, "source-branch", "master",
-		"Git branch for the repository under test")
+		"Git `branch` for the repository under test")
 	flag.StringVar(&params.testScript, "test-script", "",
-		"Test script path, relative to source-repo or absolute (required)")
+		"Test `script path`, relative to source-repo or absolute (required)")
 	flag.StringVar(&resultsRawUrl, "results-repo", "",
-		"Git URL to push test results to (optional)")
+		"Git `URL` to push test results to (required)")
 	// If the corresponding source branch is not pushed, then cloning the
 	// results repository only (if different to source) may lead to
 	// confusion due to the missing commits referenced by the notes.
 	flag.BoolVar(&params.pushSrcToRslts, "push-source-to-results", true,
 		"Push source-branch and any tag to results-repo, in addition to notes")
 	flag.Uint64Var(&params.pollIntervalS, "poll-interval", 60,
-		"While idle, poll source-repo for changes at this interval")
+		"While idle, poll source-repo for changes at this `seconds` interval")
 	flag.Parse()
 
-	if sourceRawUrl == "" || params.testScript == "" {
+	if srcRawUrl == "" || resultsRawUrl == "" || params.testScript == "" {
 		usage()
 		return
 	}
 
-	params.sourceUrl, err = url.Parse(sourceRawUrl)
+	params.sourceUrl, err = url.Parse(srcRawUrl)
 	if err != nil {
 		log.Fatalf("failed to parse URL \"%s\": %v\n",
-			sourceRawUrl, err)
+			srcRawUrl, err)
 	}
 
-	if resultsRawUrl != "" {
-		params.resultsUrl, err = url.Parse(resultsRawUrl)
-		if err != nil {
-			log.Fatalf("failed to parse URL \"%s\": %v\n",
-				resultsRawUrl, err)
-		}
+	params.resultsUrl, err = url.Parse(resultsRawUrl)
+	if err != nil {
+		log.Fatalf("failed to parse URL \"%s\": %v\n",
+			resultsRawUrl, err)
 	}
 
 	cwd, err := os.Getwd()
