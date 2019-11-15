@@ -46,20 +46,25 @@ const (
 	poll
 )
 
+type loopState struct {
+	state           State
+	transitionTimer *time.Timer
+}
+
 type stateDesc struct {
 	desc    string
 	timeout time.Duration
 }
 
 var states = map[State]stateDesc{
-	uninit:  {"uninitialized", time.Duration(0)},
+	uninit:  {"uninitialized", 0},
 	clone:   {"clone source repository", time.Duration(10 * time.Minute)},
 	verify:  {"verify branch HEAD", time.Duration(1 * time.Minute)},
 	run:     {"run test", time.Duration(2 * time.Hour)},
 	save:    {"save test output as git notes", time.Duration(1 * time.Minute)},
 	push:    {"push test output notes", time.Duration(10 * time.Minute)},
 	cleanup: {"cleanup test artifacts", time.Duration(5 * time.Minute)},
-	poll:    {"poll source for new commits", time.Duration(0)},
+	poll:    {"poll source for new commits", 0},
 }
 
 const stdoutNotesRef = "refs/notes/icyci.stdout"
@@ -229,15 +234,15 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	return
 err_out:
 	ch <- runScriptCompletion{
-		stdoutFile: "",
-		stderrFile: "",
+		stdoutFile:   "",
+		stderrFile:   "",
 		scriptStatus: err,
-		err: err}
+		err:          err}
 }
 
 type notesOut struct {
-	ns string
-	msg  string
+	ns  string
+	msg string
 }
 
 type addNotesCompletion struct {
@@ -283,7 +288,7 @@ func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
 
 	headRef := ""
 	if pushBranch {
-		headRef = "HEAD:refs/heads/"+branch
+		headRef = "HEAD:refs/heads/" + branch
 	}
 	cmd := exec.Command("git", "push", u.String(), allNotesGlob, headRef)
 	cmd.Dir = sourceDir
@@ -388,7 +393,7 @@ func pollSource(ch chan<- pollCompletion, sourceDir string, branch string,
 		goto err_out
 	}
 	log.Printf("Entering poll loop awaiting new %s commits at %s\n",
-		preFetchRev)
+		branch, preFetchRev)
 
 	for {
 		time.Sleep(time.Duration(time.Duration(pollIntervalS) * time.Second))
@@ -419,26 +424,28 @@ err_out:
 	ch <- pollCompletion{err}
 }
 
-func transitionState(newState State, curState *State,
-	stateTransTimer *time.Timer) {
+func transitionState(newState State, ls *loopState) {
+	oldState := ls.state
+	ls.state = newState
+
 	log.Printf("transitioning from state %d: %s -> %d: %s\n",
-		*curState, states[*curState].desc,
+		oldState, states[oldState].desc,
 		newState, states[newState].desc)
 
-	*curState = newState
-
-	if !stateTransTimer.Stop() {
-		// select + default to avoid deadlock when already stopped
-		select {
-		case <-stateTransTimer.C:
-		default:
-		}
-	}
-	if states[newState].timeout == time.Duration(0) {
-		log.Printf("state %d doesn't timeout", newState)
+	if oldState == uninit {
+		ls.transitionTimer = time.NewTimer(states[newState].timeout)
 		return
 	}
-	stateTransTimer.Reset(states[newState].timeout)
+
+	// don't stop timer if leaving poll state, because...
+	if oldState != poll && !ls.transitionTimer.Stop() {
+		<-ls.transitionTimer.C
+	}
+
+	// ...there's no timeout for poll state
+	if newState != poll {
+		ls.transitionTimer.Reset(states[newState].timeout)
+	}
 }
 
 // event loop to track state of clone, verify, test, push progress
@@ -455,9 +462,8 @@ func eventLoop(params *cliParams, workDir string) {
 	cleanupChan := make(chan cleanupCompletion)
 	pollChan := make(chan pollCompletion)
 
-	state := uninit
-	stateTransTimer := time.NewTimer(time.Duration(0))
-	transitionState(clone, &state, stateTransTimer)
+	var ls loopState
+	transitionState(clone, &ls)
 	go func() {
 		cloneRepo(cloneChan, workDir, params.sourceUrl,
 			params.sourceBranch, sourceDir)
@@ -471,7 +477,7 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("clone completed successfully\n")
 
-			transitionState(verify, &state, stateTransTimer)
+			transitionState(verify, &ls)
 			go func() {
 				verifyRepo(verifyChan, sourceDir,
 					params.sourceBranch)
@@ -480,7 +486,7 @@ func eventLoop(params *cliParams, workDir string) {
 			if verifyCmpl.err != nil {
 				log.Printf("verify failed: %v\n",
 					verifyCmpl.err)
-				transitionState(poll, &state, stateTransTimer)
+				transitionState(poll, &ls)
 				go func() {
 					pollSource(pollChan, sourceDir,
 						params.sourceBranch,
@@ -489,7 +495,7 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("verify completed successfully\n")
 
-			transitionState(run, &state, stateTransTimer)
+			transitionState(run, &ls)
 			go func() {
 				runScript(runScriptChan, workDir, sourceDir,
 					params.sourceBranch, params.testScript)
@@ -505,7 +511,7 @@ func eventLoop(params *cliParams, workDir string) {
 					runScriptCmpl.scriptStatus)
 			}
 
-			transitionState(save, &state, stateTransTimer)
+			transitionState(save, &ls)
 			go func() {
 				addNotes(addNotesChan, sourceDir,
 					params.sourceBranch,
@@ -518,7 +524,7 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("git notes added successfully\n")
 
-			transitionState(push, &state, stateTransTimer)
+			transitionState(push, &ls)
 			go func() {
 				pushResults(pushResultsChan, sourceDir,
 					params.sourceBranch, params.resultsUrl,
@@ -530,7 +536,7 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("git push completed successfully\n")
 
-			transitionState(cleanup, &state, stateTransTimer)
+			transitionState(cleanup, &ls)
 			go func() {
 				cleanupSource(cleanupChan, sourceDir)
 			}()
@@ -540,7 +546,7 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("cleanup completed successfully\n")
 
-			transitionState(poll, &state, stateTransTimer)
+			transitionState(poll, &ls)
 			go func() {
 				pollSource(pollChan, sourceDir,
 					params.sourceBranch,
@@ -552,13 +558,13 @@ func eventLoop(params *cliParams, workDir string) {
 			}
 			log.Printf("poll / fetch loop returned success\n")
 
-			transitionState(verify, &state, stateTransTimer)
+			transitionState(verify, &ls)
 			go func() {
 				verifyRepo(verifyChan, sourceDir,
 					params.sourceBranch)
 			}()
-		case <-stateTransTimer.C:
-			log.Fatalf("State %v transition timeout!", state)
+		case <-ls.transitionTimer.C:
+			log.Fatalf("State %v transition timeout!", ls.state)
 		}
 	}
 }
