@@ -75,11 +75,7 @@ const stdoutNotesRef = "refs/notes/icyci.stdout"
 const stderrNotesRef = "refs/notes/icyci.stderr"
 const allNotesGlob = "refs/notes/*"
 
-type cloneCompletion struct {
-	err error
-}
-
-func cloneRepo(ch chan<- cloneCompletion, workDir string, u *url.URL,
+func cloneRepo(ch chan<- error, workDir string, u *url.URL,
 	branch string, targetDir string) {
 	// TODO branch is not sanitized. Ignore submodules for now.
 	if branch == "" {
@@ -96,7 +92,7 @@ func cloneRepo(ch chan<- cloneCompletion, workDir string, u *url.URL,
 		goto err_out
 	}
 err_out:
-	ch <- cloneCompletion{err}
+	ch <- err
 }
 
 func verifyTag(sourceDir string, branch string, tag string) error {
@@ -155,12 +151,8 @@ err_out:
 	ch <- verifyCompletion{err, tag}
 }
 
-type pushLockCompletion struct {
-	err error
-}
-
 // lock to flags us as owner for testing this commit
-func pushLock(ch chan<- pushLockCompletion, sourceDir string, branch string,
+func pushLock(ch chan<- error, sourceDir string, branch string,
 	u *url.URL) {
 
 	cmd := exec.Command("git", "notes", "--ref", lockNotesRef, "add", "-m",
@@ -191,7 +183,7 @@ func pushLock(ch chan<- pushLockCompletion, sourceDir string, branch string,
 		goto err_out
 	}
 err_out:
-	ch <- pushLockCompletion{err}
+	ch <- err
 }
 
 type runScriptCompletion struct {
@@ -256,19 +248,15 @@ err_out:
 		err:          err}
 }
 
-type notesOut struct {
-	ns  string
-	msg string
-}
-
-type addNotesCompletion struct {
-	err error
-}
-
-func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
+func addNotes(ch chan<- error, sourceDir string, branch string,
 	stdoutFile string, stderrFile string) {
 
 	var err error = nil
+	type notesOut struct {
+		ns  string
+		msg string
+	}
+
 	for _, note := range []notesOut{
 		{ns: stdoutNotesRef, msg: stdoutFile},
 		{ns: stderrNotesRef, msg: stderrFile}} {
@@ -285,15 +273,11 @@ func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 		}
 	}
 err_out:
-	ch <- addNotesCompletion{err}
-}
-
-type pushResultsCompletion struct {
-	err error
+	ch <- err
 }
 
 // push captured stdout and stderr notes to the results repository.
-func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
+func pushResults(ch chan<- error, sourceDir string,
 	branch string, tag string, u *url.URL, pushSrcToRslts bool) {
 
 	gitArgs := []string{"push", u.String(), allNotesGlob}
@@ -312,14 +296,10 @@ func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
 		goto err_out
 	}
 err_out:
-	ch <- pushResultsCompletion{err}
+	ch <- err
 }
 
-type cleanupCompletion struct {
-	err error
-}
-
-func cleanupSource(ch chan<- cleanupCompletion, sourceDir string) {
+func cleanupSource(ch chan<- error, sourceDir string) {
 	cmd := exec.Command("git", "clean", "--quiet", "--force", "-xd")
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -329,7 +309,7 @@ func cleanupSource(ch chan<- cleanupCompletion, sourceDir string) {
 		goto err_out
 	}
 err_out:
-	ch <- cleanupCompletion{err}
+	ch <- err
 }
 
 func pollGetRev(sourceDir string, branch string) (string, error) {
@@ -364,11 +344,7 @@ err_out:
 	return err
 }
 
-type pollCompletion struct {
-	err error
-}
-
-func pollSource(ch chan<- pollCompletion, sourceDir string, branch string,
+func pollSource(ch chan<- error, sourceDir string, branch string,
 	pollIntervalS uint64) {
 
 	var err error = nil
@@ -409,7 +385,7 @@ func pollSource(ch chan<- pollCompletion, sourceDir string, branch string,
 		}
 	}
 err_out:
-	ch <- pollCompletion{err}
+	ch <- err
 }
 
 func transitionState(newState State, ls *loopState) {
@@ -447,14 +423,14 @@ func eventLoop(params *cliParams, workDir string) {
 	sourceDir := path.Join(workDir, "source")
 
 	// TODO reuse channels instead of creating one per activity
-	cloneChan := make(chan cloneCompletion)
+	cloneChan := make(chan error)
 	verifyChan := make(chan verifyCompletion)
-	pushLockChan := make(chan pushLockCompletion)
+	pushLockChan := make(chan error)
 	runScriptChan := make(chan runScriptCompletion)
-	addNotesChan := make(chan addNotesCompletion)
-	pushResultsChan := make(chan pushResultsCompletion)
-	cleanupChan := make(chan cleanupCompletion)
-	pollChan := make(chan pollCompletion)
+	addNotesChan := make(chan error)
+	pushResultsChan := make(chan error)
+	cleanupChan := make(chan error)
+	pollChan := make(chan error)
 
 	var ls loopState
 	transitionState(clone, &ls)
@@ -465,9 +441,9 @@ func eventLoop(params *cliParams, workDir string) {
 
 	for {
 		select {
-		case cloneCmpl := <-cloneChan:
-			if cloneCmpl.err != nil {
-				log.Fatal(cloneCmpl.err)
+		case cloneErr := <-cloneChan:
+			if cloneErr != nil {
+				log.Fatal(cloneErr)
 			}
 			log.Printf("clone completed successfully\n")
 
@@ -496,8 +472,8 @@ func eventLoop(params *cliParams, workDir string) {
 					params.sourceBranch, params.resultsUrl)
 			}()
 
-		case pushLockCmpl := <-pushLockChan:
-			if pushLockCmpl.err != nil {
+		case pushLockErr := <-pushLockChan:
+			if pushLockErr != nil {
 				transitionState(poll, &ls)
 				go func() {
 					pollSource(pollChan, sourceDir,
@@ -529,9 +505,9 @@ func eventLoop(params *cliParams, workDir string) {
 					runScriptCmpl.stdoutFile,
 					runScriptCmpl.stderrFile)
 			}()
-		case addNotesCmpl := <-addNotesChan:
-			if addNotesCmpl.err != nil {
-				log.Fatal(addNotesCmpl.err)
+		case addNotesErr := <-addNotesChan:
+			if addNotesErr != nil {
+				log.Fatal(addNotesErr)
 			}
 			log.Printf("git notes added successfully\n")
 
@@ -541,9 +517,9 @@ func eventLoop(params *cliParams, workDir string) {
 					params.sourceBranch, ls.verifiedTag,
 					params.resultsUrl, params.pushSrcToRslts)
 			}()
-		case pushResultsCmpl := <-pushResultsChan:
-			if pushResultsCmpl.err != nil {
-				log.Fatal(pushResultsCmpl.err)
+		case pushResultsErr := <-pushResultsChan:
+			if pushResultsErr != nil {
+				log.Fatal(pushResultsErr)
 			}
 			log.Printf("git push completed successfully\n")
 
@@ -551,9 +527,9 @@ func eventLoop(params *cliParams, workDir string) {
 			go func() {
 				cleanupSource(cleanupChan, sourceDir)
 			}()
-		case cleanupCmpl := <-cleanupChan:
-			if cleanupCmpl.err != nil {
-				log.Fatal(cleanupCmpl.err)
+		case cleanupErr := <-cleanupChan:
+			if cleanupErr != nil {
+				log.Fatal(cleanupErr)
 			}
 			log.Printf("cleanup completed successfully\n")
 
@@ -563,9 +539,9 @@ func eventLoop(params *cliParams, workDir string) {
 					params.sourceBranch,
 					params.pollIntervalS)
 			}()
-		case pollCmpl := <-pollChan:
-			if pollCmpl.err != nil {
-				log.Fatal(pollCmpl.err)
+		case pollErr := <-pollChan:
+			if pollErr != nil {
+				log.Fatal(pollErr)
 			}
 			log.Printf("poll / fetch loop returned success\n")
 
