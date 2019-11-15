@@ -39,6 +39,7 @@ const (
 	uninit State = iota
 	clone
 	verify
+	lock
 	run
 	save
 	push
@@ -61,6 +62,7 @@ var states = map[State]stateDesc{
 	uninit:  {"uninitialized", 0},
 	clone:   {"clone source repository", time.Duration(10 * time.Minute)},
 	verify:  {"verify branch HEAD", time.Duration(1 * time.Minute)},
+	lock:    {"lock commit for testing", time.Duration(5 * time.Minute)},
 	run:     {"run test", time.Duration(2 * time.Hour)},
 	save:    {"save test output as git notes", time.Duration(1 * time.Minute)},
 	push:    {"push test output notes", time.Duration(10 * time.Minute)},
@@ -68,6 +70,7 @@ var states = map[State]stateDesc{
 	poll:    {"poll source for new commits", 0},
 }
 
+const lockNotesRef = "refs/notes/icyci.locked"
 const stdoutNotesRef = "refs/notes/icyci.stdout"
 const stderrNotesRef = "refs/notes/icyci.stderr"
 const allNotesGlob = "refs/notes/*"
@@ -150,6 +153,45 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 	}
 err_out:
 	ch <- verifyCompletion{err, tag}
+}
+
+type pushLockCompletion struct {
+	err error
+}
+
+// lock to flags us as owner for testing this commit
+func pushLock(ch chan<- pushLockCompletion, sourceDir string, branch string,
+	u *url.URL) {
+
+	cmd := exec.Command("git", "notes", "--ref", lockNotesRef, "add", "-m",
+		"this commit is being tested by icyCI",
+		"origin/"+branch)
+	cmd.Dir = sourceDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		log.Printf("failed to add git notes lock: %v", err)
+		goto err_out
+	}
+
+	cmd = exec.Command("git", "push", u.String(), lockNotesRef)
+	cmd.Dir = sourceDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Printf("failed to push git notes lock: %v", err)
+		// delete local lock note if push failed
+		cmd = exec.Command("git", "notes", "--ref", lockNotesRef,
+			"remove", "origin/"+branch)
+		cmd.Dir = sourceDir
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		if cmd.Run() != nil {
+			log.Print("ignoring failure to cancel git notes lock")
+		}
+		goto err_out
+	}
+err_out:
+	ch <- pushLockCompletion{err}
 }
 
 type runScriptCompletion struct {
@@ -374,6 +416,11 @@ func transitionState(newState State, ls *loopState) {
 	oldState := ls.state
 	ls.state = newState
 
+	_, exists := states[newState]
+	if !exists {
+		log.Fatalf("no states entry for %d\n")
+	}
+
 	log.Printf("transitioning from state %d: %s -> %d: %s\n",
 		oldState, states[oldState].desc,
 		newState, states[newState].desc)
@@ -402,6 +449,7 @@ func eventLoop(params *cliParams, workDir string) {
 	// TODO reuse channels instead of creating one per activity
 	cloneChan := make(chan cloneCompletion)
 	verifyChan := make(chan verifyCompletion)
+	pushLockChan := make(chan pushLockCompletion)
 	runScriptChan := make(chan runScriptCompletion)
 	addNotesChan := make(chan addNotesCompletion)
 	pushResultsChan := make(chan pushResultsCompletion)
@@ -440,9 +488,25 @@ func eventLoop(params *cliParams, workDir string) {
 						params.pollIntervalS)
 				}()
 			}
+			ls.verifiedTag = verifyCmpl.tag
 			log.Printf("verify completed successfully\n")
 
-			ls.verifiedTag = verifyCmpl.tag
+			transitionState(lock, &ls)
+			go func() {
+				pushLock(pushLockChan, sourceDir,
+					params.sourceBranch, params.resultsUrl)
+			}()
+
+		case pushLockCmpl := <-pushLockChan:
+			if pushLockCmpl.err != nil {
+				transitionState(poll, &ls)
+				go func() {
+					pollSource(pollChan, sourceDir,
+						params.sourceBranch,
+						params.pollIntervalS)
+				}()
+				continue
+			}
 			transitionState(run, &ls)
 			go func() {
 				runScript(runScriptChan, workDir, sourceDir,
