@@ -86,9 +86,36 @@ git log --show-notes="*"
 ```
 
 
+Architecture
+------------
+
+icyCI runs as a relatively simple state machine:
+```
+               clone source branch
+                           ↓
+     ↗---→---→ check GPG signature on branch tip  → can't verify ---↘
+     |                     ↓                                        |
+     |         push lock to results repository    → already locked →|
+     |                     ↓                                        |
+     ↑         run test script                                      ↓
+     |                     ↓                                        |
+     |         add captured script output via git-notes             |
+     |                     ↓                                        |
+     ↑         push notes and source results repository             |
+    new                    ↓                                        |
+  commits      cleanup source repository                            |
+     |                     ↓                                        |
+     ↖---←---← fetch commits in source branch ←---←---←---←----←----↙
+                           ↺
+                        no new
+                        commits
+```
+
+
 Future
 ------
 
+- Add self test functionality
 - Improve documentation
 - Support multiple branches within one instance
 - Save and push build/test artifacts, in addition to output
