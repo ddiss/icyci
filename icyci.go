@@ -479,14 +479,13 @@ func eventLoop(params *cliParams, workDir string) {
 		case verifyCmpl := <-verifyChan:
 			ls.verifiedTag = ""
 			if verifyCmpl.err != nil {
-				log.Printf("verify failed: %v\n",
-					verifyCmpl.err)
 				transitionState(poll, &ls)
 				go func() {
 					pollSource(pollChan, sourceDir,
 						params.sourceBranch,
 						params.pollIntervalS)
 				}()
+				continue
 			}
 			ls.verifiedTag = verifyCmpl.tag
 			log.Printf("verify completed successfully\n")
