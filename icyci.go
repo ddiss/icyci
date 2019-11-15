@@ -87,13 +87,7 @@ func cloneRepo(ch chan<- cloneCompletion, workDir string, u *url.URL,
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = workDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		log.Printf("git failed to start: %v", err)
-		goto err_out
-	}
-
-	err = cmd.Wait()
+	err := cmd.Run()
 	if err != nil {
 		log.Printf("git %v failed: %v", gitArgs, err)
 		goto err_out
@@ -108,12 +102,7 @@ func verifyTag(sourceDir string, branch string, tag string) error {
 	cmd := exec.Command("git", "tag", "--verify", tag)
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		return err
-	}
-
-	return cmd.Wait()
+	return cmd.Run()
 }
 
 func verifyCommit(sourceDir string, branch string) error {
@@ -122,12 +111,7 @@ func verifyCommit(sourceDir string, branch string) error {
 	cmd := exec.Command("git", "verify-commit", "origin/"+branch)
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		return err
-	}
-
-	return cmd.Wait()
+	return cmd.Run()
 }
 
 type verifyCompletion struct {
@@ -144,13 +128,7 @@ func verifyRepo(ch chan<- verifyCompletion, sourceDir string, branch string) {
 	cmd.Dir = sourceDir
 	cmd.Stdout = &describeOut
 	cmd.Stderr = os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		log.Printf("git failed to start: %v", err)
-		goto err_out
-	}
-
-	err = cmd.Wait()
+	err := cmd.Run()
 	if err == nil {
 		// if there are >=2 tags at HEAD, git-describe outputs only one.
 		// If both unsigned and signed tags exist, git-describe outputs
@@ -189,15 +167,8 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 
 	cmd := exec.Command("git", "checkout", "--quiet", "origin/"+branch)
 	cmd.Dir = sourceDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		log.Printf("git failed to start: %v", err)
-		goto err_out
-	}
-
-	err = cmd.Wait()
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err := cmd.Run()
 	if err != nil {
 		log.Printf("git failed: %v", err)
 		goto err_out
@@ -265,13 +236,7 @@ func addNotes(ch chan<- addNotesCompletion, sourceDir string, branch string,
 		cmd := exec.Command("git", gitArgs...)
 		cmd.Dir = sourceDir
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		err = cmd.Start()
-		if err != nil {
-			log.Printf("git failed to start: %v", err)
-			goto err_out
-		}
-
-		err = cmd.Wait()
+		err = cmd.Run()
 		if err != nil {
 			log.Printf("git %v failed: %v", gitArgs, err)
 			goto err_out
@@ -299,13 +264,7 @@ func pushResults(ch chan<- pushResultsCompletion, sourceDir string,
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		log.Printf("git failed to start: %v", err)
-		goto err_out
-	}
-
-	err = cmd.Wait()
+	err := cmd.Run()
 	if err != nil {
 		log.Printf("git failed: %v", err)
 		goto err_out
@@ -322,13 +281,7 @@ func cleanupSource(ch chan<- cleanupCompletion, sourceDir string) {
 	cmd := exec.Command("git", "clean", "--quiet", "--force", "-xd")
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		log.Printf("git failed to start: %v", err)
-		goto err_out
-	}
-
-	err = cmd.Wait()
+	err := cmd.Run()
 	if err != nil {
 		log.Printf("git failed: %v", err)
 		goto err_out
@@ -345,13 +298,7 @@ func pollGetRev(sourceDir string, branch string) (string, error) {
 	cmd.Dir = sourceDir
 	cmd.Stdout = &revParseOut
 	cmd.Stderr = os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		log.Printf("git failed to start: %v", err)
-		goto err_out
-	}
-
-	err = cmd.Wait()
+	err := cmd.Run()
 	if err != nil {
 		log.Print("git rev-parse failed: %v\n", err)
 		goto err_out
@@ -365,15 +312,8 @@ err_out:
 func pollFetch(sourceDir string, branch string) error {
 	cmd := exec.Command("git", "fetch", "origin")
 	cmd.Dir = sourceDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Start()
-	if err != nil {
-		log.Printf("git failed to start: %v", err)
-		goto err_out
-	}
-
-	err = cmd.Wait()
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err := cmd.Run()
 	if err != nil {
 		log.Print("git fetch failed: %v\n", err)
 		goto err_out
