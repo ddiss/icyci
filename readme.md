@@ -18,6 +18,7 @@ It differs from other CI utilities in a few ways:
 | Fast           | Asynchronous, event based architecture                      |
 | Informative    | Results published as git-notes, viewable from git log       |
 | Simple         | Set and forget. Polls and tests new changes automatically.  |
+| Distributed    | Can cooperatively run on a single or multiple hosts         |
 
 
 Usage
@@ -31,14 +32,14 @@ are imported below:
 gpg2 --locate-keys torvalds@kernel.org gregkh@kernel.org
 ```
 
-In case you haven't already, ensure that the user running icyCI has
-a git user.name:
+In case you haven't already, ensure that the user running icyCI has a Git
+user.name configured:
 ```sh
 git config --global user.name "icyCI"
 ```
 
-Create a new repository to store the test results. This example uses a local
-directory, but a remote host could also be used.
+Create a new Git repository to store the test results. This example uses a local
+directory, but a remote repository could also be used.
 ```sh
 git init --bare ~/icyci-linux-results
 ```
@@ -50,13 +51,16 @@ echo '#!/bin/bash
 chmod 755 ~/build-linux.sh
 ```
 
-Start icyCI, pointing it at Linus' mainline kernel repository, the test script
-as well as the results repository:
+Start icyCI, pointing it at a branch of the stable kernel repository, the test
+script, and the results repository:
 ```sh
-icyci -source-repo git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git -source-branch master -results-repo ~/icyci-linux-results -test-script ~/build-linux.sh
+icyci -source-repo git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git \
+	-source-branch linux-5.3.y \
+	-test-script ~/build-linux.sh \
+	-results-repo ~/icyci-linux-results
 ```
 
-[Wait for icyCI to complete]
+[Wait for icyCI to push results, after which it'll poll for source changes]
 
 To view the test script results, you can either do a fresh clone of the
 *results-repo*:
@@ -89,7 +93,7 @@ Future
 - Support multiple branches within one instance
 - Save and push build/test artifacts, in addition to output
 - Periodically push progress while testing
-- Support multiple concurrent instances tracking the same source
+- Improve logging
 - Your feature; please raise requests via the issue tracker
 
 
