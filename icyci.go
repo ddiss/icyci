@@ -28,7 +28,6 @@ type cliParams struct {
 	sourceBranch   string
 	testScript     string
 	resultsUrl     *url.URL
-	resultsBranch  string
 	pushSrcToRslts bool
 	pollIntervalS  uint64
 }
@@ -322,7 +321,7 @@ func pollGetRev(sourceDir string, branch string) (string, error) {
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
-		log.Print("git rev-parse failed: %v\n", err)
+		log.Printf("git rev-parse failed: %v\n", err)
 		goto err_out
 	}
 
@@ -337,7 +336,7 @@ func pollFetch(sourceDir string, branch string) error {
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Run()
 	if err != nil {
-		log.Print("git fetch failed: %v\n", err)
+		log.Printf("git fetch failed: %v\n", err)
 		goto err_out
 	}
 err_out:
@@ -353,7 +352,7 @@ func pollSource(ch chan<- error, sourceDir string, branch string,
 
 	preFetchRev, err := pollGetRev(sourceDir, branch)
 	if err != nil {
-		log.Print("failed to get pre-fetch revision: %v\n", err)
+		log.Printf("failed to get pre-fetch revision: %v\n", err)
 		goto err_out
 	}
 	log.Printf("Entering poll loop awaiting new %s commits at %s\n",
@@ -394,7 +393,7 @@ func transitionState(newState State, ls *loopState) {
 
 	_, exists := states[newState]
 	if !exists {
-		log.Fatalf("no states entry for %d\n")
+		log.Fatalf("no states entry for %d\n", newState)
 	}
 
 	log.Printf("transitioning from state %d: %s -> %d: %s\n",
@@ -445,7 +444,7 @@ func eventLoop(params *cliParams, workDir string) {
 			if cloneErr != nil {
 				log.Fatal(cloneErr)
 			}
-			log.Printf("clone completed successfully\n")
+			log.Print("clone completed successfully\n")
 
 			transitionState(verify, &ls)
 			go func() {
@@ -464,7 +463,7 @@ func eventLoop(params *cliParams, workDir string) {
 				continue
 			}
 			ls.verifiedTag = verifyCmpl.tag
-			log.Printf("verify completed successfully\n")
+			log.Print("verify completed successfully\n")
 
 			transitionState(lock, &ls)
 			go func() {
@@ -492,7 +491,7 @@ func eventLoop(params *cliParams, workDir string) {
 				log.Fatal(runScriptCmpl.err)
 			}
 			if runScriptCmpl.scriptStatus == nil {
-				log.Printf("test script completed successfully\n")
+				log.Print("test script completed successfully\n")
 			} else {
 				log.Printf("test script failed: %v\n",
 					runScriptCmpl.scriptStatus)
@@ -509,7 +508,7 @@ func eventLoop(params *cliParams, workDir string) {
 			if addNotesErr != nil {
 				log.Fatal(addNotesErr)
 			}
-			log.Printf("git notes added successfully\n")
+			log.Print("git notes added successfully\n")
 
 			transitionState(push, &ls)
 			go func() {
@@ -521,7 +520,7 @@ func eventLoop(params *cliParams, workDir string) {
 			if pushResultsErr != nil {
 				log.Fatal(pushResultsErr)
 			}
-			log.Printf("git push completed successfully\n")
+			log.Print("git push completed successfully\n")
 
 			transitionState(cleanup, &ls)
 			go func() {
@@ -531,7 +530,7 @@ func eventLoop(params *cliParams, workDir string) {
 			if cleanupErr != nil {
 				log.Fatal(cleanupErr)
 			}
-			log.Printf("cleanup completed successfully\n")
+			log.Print("cleanup completed successfully\n")
 
 			transitionState(poll, &ls)
 			go func() {
@@ -543,7 +542,7 @@ func eventLoop(params *cliParams, workDir string) {
 			if pollErr != nil {
 				log.Fatal(pollErr)
 			}
-			log.Printf("poll / fetch loop returned success\n")
+			log.Print("poll / fetch loop returned success\n")
 
 			transitionState(verify, &ls)
 			go func() {
