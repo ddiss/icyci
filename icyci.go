@@ -417,7 +417,7 @@ func transitionState(newState State, ls *loopState) {
 }
 
 // event loop to track state of clone, verify, test, push progress
-func eventLoop(params *cliParams, workDir string) {
+func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 
 	sourceDir := path.Join(workDir, "source")
 
@@ -551,6 +551,10 @@ func eventLoop(params *cliParams, workDir string) {
 			}()
 		case <-ls.transitionTimer.C:
 			log.Fatalf("State %v transition timeout!", ls.state)
+		case <- exitChan:
+			log.Printf("Got exit message while in state %d\n",
+				ls.state)
+			return
 		}
 	}
 }
@@ -614,5 +618,5 @@ func main() {
 	}
 	defer os.Chdir(cwd)
 
-	eventLoop(params, wdir)
+	eventLoop(params, wdir, nil)
 }
