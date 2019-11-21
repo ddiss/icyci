@@ -115,7 +115,7 @@ icyCI runs as a relatively simple state machine:
 Future
 ------
 
-- Add self test functionality
+- Improve self test functionality
 - Improve documentation
 - Support multiple branches within one instance
 - Save and push build/test artifacts, in addition to output
