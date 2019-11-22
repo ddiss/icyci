@@ -77,7 +77,9 @@ of the *source-repo*:
 # git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 cd linux
 git remote add icyci-results ~/icyci-linux-results
-git fetch icyci-results "refs/notes/*:refs/notes/*"
+# git doesn't fetch notes by default, so configure it to do so...
+git config --add remote.icyci-results.fetch "refs/notes/*:refs/notes/*"
+git fetch icyci-results
 ```
 
 The icyCI test results can be viewed alongside the regular git log output with:
