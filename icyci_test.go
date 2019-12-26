@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -271,6 +272,119 @@ func TestSeparateSrcRslt(t *testing.T) {
 				<-notesWaitTimer.C
 			}
 			return
+		case <-notesWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}
+
+// - source and results are same git repos
+// - single icyCI instance trusting only one key
+// - move source head forward
+// - wait for new head to be tested successfully
+// - loop over last two items "maxCommitI" times
+func TestNewHeadSameSrcRslt(t *testing.T) {
+	// commitI tracks the number of commits for which we should expect a
+	// corresponding results note entry.
+	var commitI int = 0
+	var curCommit string
+	const maxCommitI int = 3
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir, rdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+		"commitI: "+strconv.Itoa(commitI))
+	commitI++
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1,	// minimal
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd = exec.Command("git", "clone", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// results are separate
+	cmd = exec.Command("git", "config", "--add", "remote.origin.fetch",
+		"refs/notes/*:refs/notes/*")
+	cmd.Dir = cloneDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+	}()
+
+	notesWaitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case notes := <-notesChan:
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			if commitI == maxCommitI {
+				// Finished, tell icyCI eventLoop to end
+				evExitChan <- 1
+				wg.Wait()
+				return
+			}
+			curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+				"commitI: "+strconv.Itoa(commitI))
+			commitI++
+			go func() {
+				waitNotes(t, cloneDir, stdoutNotesRef,
+					curCommit, notesChan)
+			}()
+			notesWaitTimer.Reset(time.Second * 10)
+
 		case <-notesWaitTimer.C:
 			t.Fatal("timeout while waiting for icyCI notes\n")
 		}
