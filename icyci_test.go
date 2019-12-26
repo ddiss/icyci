@@ -12,8 +12,8 @@ import (
 	"os/exec"
 	"path"
 	"sync"
-	"time"
 	"testing"
+	"time"
 )
 
 const (
@@ -21,7 +21,16 @@ const (
 	userEmail = "icyci@example.com"
 )
 
-func gpgInit(t *testing.T, gpgDir string) {
+func gpgInit(t *testing.T, tdir string) {
+	// GNUPGHOME for key import and verification
+	gpgDir := path.Join(tdir, "gpg")
+
+	// export HOME and GNUPGHOME to ensure that our custom git + gpg configs
+	// are picked up for all git operations.
+	os.Setenv("HOME", tdir)
+	os.Setenv("GNUPGHOME", gpgDir)
+	os.Setenv("GIT_PAGER", "")
+
 	err := os.MkdirAll(gpgDir, 0700)
 	if err != nil {
 		t.Fatal(err)
@@ -65,9 +74,9 @@ func gitReposInit(t *testing.T, gitHomeDir string, sdir string, rdir string) {
 	gitCfg := path.Join(gitHomeDir, ".gitconfig")
 	err := ioutil.WriteFile(gitCfg,
 		[]byte(`[user]
-			name = ` + userName + `
-		        email = ` + userEmail + `
-			signingKey = <` + userEmail + `>`),
+			name = `+userName+`
+		        email = `+userEmail+`
+			signingKey = <`+userEmail+`>`),
 		os.FileMode(0644))
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +97,52 @@ func gitReposInit(t *testing.T, gitHomeDir string, sdir string, rdir string) {
 	}
 }
 
-func waitNotes(t *testing.T, repoDir string, notesRef string,
+func fileWriteCommit(t *testing.T, sdir string, sfile string,
+	echoStr string) string {
+
+	srcPath := path.Join(sdir, sfile)
+	err := ioutil.WriteFile(srcPath,
+		[]byte(`#!/bin/bash
+			echo "`+echoStr+`"`),
+		os.FileMode(0755))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("git", "add", srcPath)
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = exec.Command("git", "commit", "-a", "-S", "-m",
+		"signed source commit")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var revParseOut bytes.Buffer
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = sdir
+	cmd.Stdout = &revParseOut
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	curRev := string(bytes.TrimRight(revParseOut.Bytes(), "\n"))
+	t.Logf("%s: committed %s script: echo \"%s\"\n", curRev, sfile, echoStr)
+
+	return curRev
+}
+
+func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
 	notesChan chan<- bytes.Buffer) {
 
 	for {
@@ -103,8 +157,9 @@ func waitNotes(t *testing.T, repoDir string, notesRef string,
 			t.Fatal(err)
 		}
 
-		t.Logf("checking notes")
-		cmd = exec.Command("git", "notes", "--ref=" + notesRef, "show")
+		t.Logf("checking notes at %s", srcRef)
+		cmd = exec.Command("git", "notes", "--ref="+notesRef, "show",
+				"--", srcRef)
 		cmd.Dir = repoDir
 		cmd.Stdout = &notesOut
 		cmd.Stderr = os.Stderr
@@ -132,29 +187,11 @@ func TestSeparateSrcRslt(t *testing.T) {
 	}
 	defer os.RemoveAll(tdir)
 
-	// GNUPGHOME for key import and verification
-	gpgDir := path.Join(tdir, "gpg")
-
-	// export HOME and GNUPGHOME to ensure that our custom git + gpg configs
-	// are picked up for all git operations.
-	os.Setenv("HOME", tdir)
-	os.Setenv("GNUPGHOME", gpgDir)
-	os.Setenv("GIT_PAGER", "")
-
-	gpgInit(t, gpgDir)
+	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src")
 	rdir := path.Join(tdir, "test_rslt")
 	gitReposInit(t, tdir, sdir, rdir)
-
-	srcTest := path.Join(sdir, "src_test.sh")
-	err = ioutil.WriteFile(srcTest,
-		[]byte(`#!/bin/bash
-			echo "this has been run by icyci"`),
-		os.FileMode(0755))
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	cmd := exec.Command("git", "checkout", "-b", "mybranch")
 	cmd.Dir = sdir
@@ -164,22 +201,8 @@ func TestSeparateSrcRslt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd = exec.Command("git", "add", "src_test.sh")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd = exec.Command("git", "commit", "-a", "-S", "-m",
-		"signed source commit")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	fileWriteCommit(t, sdir, "src_test.sh",
+		"this has been run by icyci")
 
 	surl, err := url.Parse(sdir)
 	rurl, err := url.Parse(rdir)
@@ -230,7 +253,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, "HEAD", notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
