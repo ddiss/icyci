@@ -160,7 +160,7 @@ func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
 
 		t.Logf("checking notes at %s", srcRef)
 		cmd = exec.Command("git", "notes", "--ref="+notesRef, "show",
-				"--", srcRef)
+			"--", srcRef)
 		cmd.Dir = repoDir
 		cmd.Stdout = &notesOut
 		cmd.Stderr = os.Stderr
@@ -322,7 +322,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1,	// minimal
+		pollIntervalS:  1, // minimal
 	}
 
 	var wg sync.WaitGroup
@@ -434,7 +434,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1,	// minimal
+		pollIntervalS:  1, // minimal
 	}
 
 	var wg sync.WaitGroup
@@ -489,7 +489,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 			wg.Wait()
 
 			if commitI >= maxCommitI {
-				return	// all done
+				return // all done
 			}
 			curCommit = fileWriteCommit(t, sdir, "src_test.sh",
 				"commitI: "+strconv.Itoa(commitI))
