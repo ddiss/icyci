@@ -336,17 +336,8 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
 
-	cmd = exec.Command("git", "clone", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// results are separate
-	cmd = exec.Command("git", "config", "--add", "remote.origin.fetch",
-		"refs/notes/*:refs/notes/*")
-	cmd.Dir = cloneDir
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err = cmd.Run()
 	if err != nil {
@@ -449,17 +440,8 @@ func TestNewHeadWhileStopped(t *testing.T) {
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
 
-	cmd = exec.Command("git", "clone", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// results are separate
-	cmd = exec.Command("git", "config", "--add", "remote.origin.fetch",
-		"refs/notes/*:refs/notes/*")
-	cmd.Dir = cloneDir
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err = cmd.Run()
 	if err != nil {
