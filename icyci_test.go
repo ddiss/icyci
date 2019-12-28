@@ -118,9 +118,11 @@ func fileWriteCommit(t *testing.T, sdir string, sfile string,
 		t.Fatal(err)
 	}
 
-	gitCmd := []string{"commit", "-a", "-m", "signed source commit"}
+	gitCmd := []string{"commit", "-a"}
 	if sign {
-		gitCmd = append(gitCmd, "-S")
+		gitCmd = append(gitCmd, "-S", "-m", "signed source commit")
+	} else {
+		gitCmd = append(gitCmd, "-m", "unsigned source commit")
 	}
 
 	cmd = exec.Command("git", gitCmd...)
@@ -525,9 +527,9 @@ func TestNewHeadWhileStopped(t *testing.T) {
 }
 
 type logParser struct {
-	T *testing.T
+	T      *testing.T
 	needle []byte
-	ch chan<- bool
+	ch     chan<- bool
 }
 
 // XXX this assumes that the grepped string will be carried in its entirity in a
@@ -540,12 +542,12 @@ func (lp *logParser) Write(p []byte) (int, error) {
 
 	lp.T.Logf("parsing icyci log msg: %s", string(p))
 
-	if p[l - 1] != '\n' {
+	if p[l-1] != '\n' {
 		lp.T.Logf("parsing log msg without line end - grep may fail!")
 	}
 
 	if bytes.Contains(p, lp.needle) {
-		lp.ch<- true
+		lp.ch <- true
 	}
 	return l, nil
 }
@@ -645,9 +647,9 @@ func TestStopStart(t *testing.T) {
 			}
 
 			lp := logParser{
-				T: t,
+				T:      t,
 				needle: []byte("failed to add git notes lock"),
-				ch: grepChan,
+				ch:     grepChan,
 			}
 			log.SetOutput(&lp)
 			t.Logf("parsing icyCI log for: %s", string(lp.needle))
@@ -676,6 +678,145 @@ func TestStopStart(t *testing.T) {
 					curCommit, notesChan)
 			}()
 			notesWaitTimer.Reset(time.Second * 10)
+		case <-notesWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}
+
+// - source HEAD isn't signed, but a corresponding signed tag is
+// FIXME icyci currently only polls for heads, so the signed tag needs to be
+// pushed before the new head
+func TestSignedTagUnsignedCommit(t *testing.T) {
+	// commitI tracks the number of commits for which we should expect a
+	// corresponding results note entry.
+	var commitI int = 0
+	var curCommit string
+	const maxCommitI int = 3
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir, rdir)
+
+	// commit from clone so that we can push the tag before the new head
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd := exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = cloneDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	curCommit = fileWriteUnsignedCommit(t, cloneDir, "src_test.sh",
+		"commitI: "+strconv.Itoa(commitI))
+	commitI++
+
+	tagName := "mytag" + strconv.Itoa(commitI)
+	cmd = exec.Command("git", "tag", "-s", "-m", "signed tag", tagName)
+	cmd.Dir = cloneDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = exec.Command("git", "push", sdir, tagName, "mybranch:mybranch")
+	cmd.Dir = cloneDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+	}()
+
+	notesWaitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case notes := <-notesChan:
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			if commitI == maxCommitI {
+				// Finished, tell icyCI eventLoop to end
+				evExitChan <- 1
+				wg.Wait()
+				return
+			}
+			curCommit = fileWriteUnsignedCommit(
+				t, cloneDir, "src_test.sh",
+				"commitI: "+strconv.Itoa(commitI))
+			commitI++
+
+			tagName = "mytag" + strconv.Itoa(commitI)
+			cmd = exec.Command("git", "tag", "-s",
+				"-m", "signed tag", tagName)
+			cmd.Dir = cloneDir
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			err = cmd.Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			cmd = exec.Command("git", "push", sdir, tagName,
+				"mybranch:mybranch")
+			cmd.Dir = cloneDir
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			err = cmd.Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() {
+				waitNotes(t, cloneDir, stdoutNotesRef,
+					curCommit, notesChan)
+			}()
+			notesWaitTimer.Reset(time.Second * 10)
+
 		case <-notesWaitTimer.C:
 			t.Fatal("timeout while waiting for icyCI notes\n")
 		}
