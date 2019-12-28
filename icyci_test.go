@@ -100,8 +100,7 @@ func gitReposInit(t *testing.T, gitHomeDir string, sdir string, rdir string) {
 }
 
 func fileWriteCommit(t *testing.T, sdir string, sfile string,
-	echoStr string) string {
-
+	echoStr string, sign bool) string {
 	srcPath := path.Join(sdir, sfile)
 	err := ioutil.WriteFile(srcPath,
 		[]byte(`#!/bin/bash
@@ -119,8 +118,12 @@ func fileWriteCommit(t *testing.T, sdir string, sfile string,
 		t.Fatal(err)
 	}
 
-	cmd = exec.Command("git", "commit", "-a", "-S", "-m",
-		"signed source commit")
+	gitCmd := []string{"commit", "-a", "-m", "signed source commit"}
+	if sign {
+		gitCmd = append(gitCmd, "-S")
+	}
+
+	cmd = exec.Command("git", gitCmd...)
 	cmd.Dir = sdir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err = cmd.Run()
@@ -139,9 +142,25 @@ func fileWriteCommit(t *testing.T, sdir string, sfile string,
 	}
 
 	curRev := string(bytes.TrimRight(revParseOut.Bytes(), "\n"))
-	t.Logf("%s: committed %s script: echo \"%s\"\n", curRev, sfile, echoStr)
+	if sign {
+		t.Logf("%s: signed commit %s script: echo \"%s\"\n",
+			curRev, sfile, echoStr)
+	} else {
+		t.Logf("%s: unsigned commit %s script: echo \"%s\"\n",
+			curRev, sfile, echoStr)
+	}
 
 	return curRev
+}
+
+func fileWriteSignedCommit(t *testing.T, sdir string, sfile string,
+	echoStr string) string {
+	return fileWriteCommit(t, sdir, sfile, echoStr, true)
+}
+
+func fileWriteUnsignedCommit(t *testing.T, sdir string, sfile string,
+	echoStr string) string {
+	return fileWriteCommit(t, sdir, sfile, echoStr, false)
 }
 
 func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
@@ -203,7 +222,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fileWriteCommit(t, sdir, "src_test.sh",
+	fileWriteSignedCommit(t, sdir, "src_test.sh",
 		"this has been run by icyci")
 
 	surl, err := url.Parse(sdir)
@@ -311,7 +330,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		"commitI: "+strconv.Itoa(commitI))
 	commitI++
 
@@ -368,7 +387,8 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 				wg.Wait()
 				return
 			}
-			curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+			curCommit = fileWriteSignedCommit(
+				t, sdir, "src_test.sh",
 				"commitI: "+strconv.Itoa(commitI))
 			commitI++
 			go func() {
@@ -414,7 +434,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		"commitI: "+strconv.Itoa(commitI))
 	commitI++
 
@@ -474,10 +494,12 @@ func TestNewHeadWhileStopped(t *testing.T) {
 			if commitI >= maxCommitI {
 				return // all done
 			}
-			curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+			curCommit = fileWriteSignedCommit(
+				t, sdir, "src_test.sh",
 				"commitI: "+strconv.Itoa(commitI))
 			commitI++
-			curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+			curCommit = fileWriteSignedCommit(
+				t, sdir, "src_test.sh",
 				"commitI: "+strconv.Itoa(commitI))
 			commitI++
 
@@ -560,7 +582,7 @@ func TestStopStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		"commitI: "+strconv.Itoa(commitI))
 	commitI++
 
@@ -644,7 +666,8 @@ func TestStopStart(t *testing.T) {
 			// restore log
 			log.SetOutput(os.Stderr)
 
-			curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+			curCommit = fileWriteSignedCommit(
+				t, sdir, "src_test.sh",
 				"commitI: "+strconv.Itoa(commitI))
 			commitI++
 
