@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"io/ioutil"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -495,6 +496,163 @@ func TestNewHeadWhileStopped(t *testing.T) {
 			}()
 			notesWaitTimer.Reset(time.Second * 10)
 
+		case <-notesWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}
+
+type logParser struct {
+	T *testing.T
+	needle []byte
+	ch chan<- bool
+}
+
+// XXX this assumes that the grepped string will be carried in its entirity in a
+// Write(p) call. It probably makes sense to buffer full lines before compare.
+func (lp *logParser) Write(p []byte) (int, error) {
+	l := len(p)
+	if l == 0 {
+		return 0, nil
+	}
+
+	lp.T.Logf("parsing icyci log msg: %s", string(p))
+
+	if p[l - 1] != '\n' {
+		lp.T.Logf("parsing log msg without line end - grep may fail!")
+	}
+
+	if bytes.Contains(p, lp.needle) {
+		lp.ch<- true
+	}
+	return l, nil
+}
+
+// - single icyCI instance trusting only one key
+// - stop instance
+// - start new instance
+// - check for lock failure by scraping logs
+// - move forward head and ensure new commit is tested
+func TestStopStart(t *testing.T) {
+	// commitI tracks the number of commits for which we should expect a
+	// corresponding results note entry.
+	var commitI int = 0
+	var curCommit string
+	const maxCommitI int = 3
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir, rdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+		"commitI: "+strconv.Itoa(commitI))
+	commitI++
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		t.Log("starting icyCI eventLoop")
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+	}()
+
+	grepChan := make(chan bool)
+	notesWaitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case notes := <-notesChan:
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+
+			t.Log("telling icyCI eventLoop to end")
+			evExitChan <- 1
+			wg.Wait()
+
+			if commitI >= maxCommitI {
+				return // all done
+			}
+
+			lp := logParser{
+				T: t,
+				needle: []byte("failed to add git notes lock"),
+				ch: grepChan,
+			}
+			log.SetOutput(&lp)
+			t.Logf("parsing icyCI log for: %s", string(lp.needle))
+
+			wg.Add(1)
+			go func() {
+				// we're reusing icyci's tmp dir, so need to
+				// explicitly delete the "source" working dir
+				os.RemoveAll(path.Join(tdir, "source"))
+				t.Log("starting icyCI eventLoop")
+				eventLoop(&params, tdir, evExitChan)
+				wg.Done()
+			}()
+			notesWaitTimer.Reset(time.Second * 10)
+		case <-grepChan:
+			// restore log
+			log.SetOutput(os.Stderr)
+
+			curCommit = fileWriteCommit(t, sdir, "src_test.sh",
+				"commitI: "+strconv.Itoa(commitI))
+			commitI++
+
+			go func() {
+				waitNotes(t, cloneDir, stdoutNotesRef,
+					curCommit, notesChan)
+			}()
+			notesWaitTimer.Reset(time.Second * 10)
 		case <-notesWaitTimer.C:
 			t.Fatal("timeout while waiting for icyCI notes\n")
 		}
