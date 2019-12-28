@@ -822,3 +822,121 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 		}
 	}
 }
+
+// - first commit is signed, then alternate between signed and unsigned
+func TestMixUnsignedSigned(t *testing.T) {
+	var commitI int = 0
+	var curCommit string
+	const maxCommitI int = 4
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir, rdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
+		"commitI: "+strconv.Itoa(commitI))
+	commitI++
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		t.Log("starting icyCI eventLoop")
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+	}()
+
+	grepChan := make(chan bool)
+	notesWaitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case notes := <-notesChan:
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+
+			if commitI >= maxCommitI {
+				return // all done
+			}
+
+			lp := logParser{
+				T:      t,
+				needle: []byte("GPG verification of commit at origin/mybranch failed"),
+				ch:     grepChan,
+			}
+			log.SetOutput(&lp)
+			t.Logf("parsing icyCI log for: %s", string(lp.needle))
+
+			curCommit = fileWriteUnsignedCommit(
+				t, sdir, "src_test.sh",
+				"commitI: "+strconv.Itoa(commitI))
+			commitI++
+
+			notesWaitTimer.Reset(time.Second * 10)
+		case <-grepChan:
+			// restore log
+			log.SetOutput(os.Stderr)
+
+			curCommit = fileWriteSignedCommit(
+				t, sdir, "src_test.sh",
+				"commitI: "+strconv.Itoa(commitI))
+			commitI++
+
+			go func() {
+				waitNotes(t, cloneDir, stdoutNotesRef,
+					curCommit, notesChan)
+			}()
+			notesWaitTimer.Reset(time.Second * 10)
+		case <-notesWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}
