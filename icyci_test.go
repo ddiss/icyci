@@ -100,11 +100,10 @@ func gitReposInit(t *testing.T, gitHomeDir string, sdir string, rdir string) {
 }
 
 func fileWriteCommit(t *testing.T, sdir string, sfile string,
-	echoStr string, sign bool) string {
+	script string, sign bool) string {
 	srcPath := path.Join(sdir, sfile)
 	err := ioutil.WriteFile(srcPath,
-		[]byte(`#!/bin/bash
-			echo "`+echoStr+`"`),
+		[]byte("#!/bin/bash\n"+script),
 		os.FileMode(0755))
 	if err != nil {
 		t.Fatal(err)
@@ -145,24 +144,24 @@ func fileWriteCommit(t *testing.T, sdir string, sfile string,
 
 	curRev := string(bytes.TrimRight(revParseOut.Bytes(), "\n"))
 	if sign {
-		t.Logf("%s: signed commit %s script: echo \"%s\"\n",
-			curRev, sfile, echoStr)
+		t.Logf("%s: signed commit %s script: %s\n",
+			curRev, sfile, script)
 	} else {
-		t.Logf("%s: unsigned commit %s script: echo \"%s\"\n",
-			curRev, sfile, echoStr)
+		t.Logf("%s: unsigned commit %s script: %s\n",
+			curRev, sfile, script)
 	}
 
 	return curRev
 }
 
 func fileWriteSignedCommit(t *testing.T, sdir string, sfile string,
-	echoStr string) string {
-	return fileWriteCommit(t, sdir, sfile, echoStr, true)
+	script string) string {
+	return fileWriteCommit(t, sdir, sfile, script, true)
 }
 
 func fileWriteUnsignedCommit(t *testing.T, sdir string, sfile string,
-	echoStr string) string {
-	return fileWriteCommit(t, sdir, sfile, echoStr, false)
+	script string) string {
+	return fileWriteCommit(t, sdir, sfile, script, false)
 }
 
 func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
@@ -225,7 +224,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 	}
 
 	fileWriteSignedCommit(t, sdir, "src_test.sh",
-		"this has been run by icyci")
+		`echo "this has been run by icyci"`)
 
 	surl, err := url.Parse(sdir)
 	rurl, err := url.Parse(rdir)
@@ -333,7 +332,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 	}
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
-		"commitI: "+strconv.Itoa(commitI))
+		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
 	surl, err := url.Parse(sdir)
@@ -391,7 +390,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 			}
 			curCommit = fileWriteSignedCommit(
 				t, sdir, "src_test.sh",
-				"commitI: "+strconv.Itoa(commitI))
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 			commitI++
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
@@ -437,7 +436,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 	}
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
-		"commitI: "+strconv.Itoa(commitI))
+		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
 	surl, err := url.Parse(sdir)
@@ -498,11 +497,11 @@ func TestNewHeadWhileStopped(t *testing.T) {
 			}
 			curCommit = fileWriteSignedCommit(
 				t, sdir, "src_test.sh",
-				"commitI: "+strconv.Itoa(commitI))
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 			commitI++
 			curCommit = fileWriteSignedCommit(
 				t, sdir, "src_test.sh",
-				"commitI: "+strconv.Itoa(commitI))
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 			commitI++
 
 			wg.Add(1)
@@ -585,7 +584,7 @@ func TestStopStart(t *testing.T) {
 	}
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
-		"commitI: "+strconv.Itoa(commitI))
+		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
 	surl, err := url.Parse(sdir)
@@ -670,7 +669,7 @@ func TestStopStart(t *testing.T) {
 
 			curCommit = fileWriteSignedCommit(
 				t, sdir, "src_test.sh",
-				"commitI: "+strconv.Itoa(commitI))
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 			commitI++
 
 			go func() {
@@ -726,7 +725,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 	}
 
 	curCommit = fileWriteUnsignedCommit(t, cloneDir, "src_test.sh",
-		"commitI: "+strconv.Itoa(commitI))
+		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
 	tagName := "mytag" + strconv.Itoa(commitI)
@@ -790,7 +789,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 			}
 			curCommit = fileWriteUnsignedCommit(
 				t, cloneDir, "src_test.sh",
-				"commitI: "+strconv.Itoa(commitI))
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 			commitI++
 
 			tagName = "mytag" + strconv.Itoa(commitI)
@@ -850,7 +849,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 	}
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
-		"commitI: "+strconv.Itoa(commitI))
+		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
 	surl, err := url.Parse(sdir)
@@ -917,7 +916,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 			curCommit = fileWriteUnsignedCommit(
 				t, sdir, "src_test.sh",
-				"commitI: "+strconv.Itoa(commitI))
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 			commitI++
 
 			notesWaitTimer.Reset(time.Second * 10)
@@ -927,7 +926,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 			curCommit = fileWriteSignedCommit(
 				t, sdir, "src_test.sh",
-				"commitI: "+strconv.Itoa(commitI))
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 			commitI++
 
 			go func() {
