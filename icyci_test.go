@@ -99,35 +99,37 @@ func gitReposInit(t *testing.T, gitHomeDir string, sdir string, rdir string) {
 	}
 }
 
-func fileWriteCommit(t *testing.T, sdir string, sfile string,
-	script string, sign bool) string {
-	srcPath := path.Join(sdir, sfile)
-	err := ioutil.WriteFile(srcPath,
-		[]byte("#!/bin/bash\n"+script),
-		os.FileMode(0755))
-	if err != nil {
-		t.Fatal(err)
+func fileWriteCommit(t *testing.T, sdir string, sfiles map[string]string,
+	sign bool) string {
+	for sfile, script := range sfiles {
+		srcPath := path.Join(sdir, sfile)
+		err := ioutil.WriteFile(srcPath,
+			[]byte("#!/bin/bash\n"+script),
+			os.FileMode(0755))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		cmd := exec.Command("git", "add", srcPath)
+		cmd.Dir = sdir
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	cmd := exec.Command("git", "add", srcPath)
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	gitCmd := []string{"commit", "-a"}
+	gitCmd := []string{"commit"}
 	if sign {
 		gitCmd = append(gitCmd, "-S", "-m", "signed source commit")
 	} else {
 		gitCmd = append(gitCmd, "-m", "unsigned source commit")
 	}
 
-	cmd = exec.Command("git", gitCmd...)
+	cmd := exec.Command("git", gitCmd...)
 	cmd.Dir = sdir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,11 +146,9 @@ func fileWriteCommit(t *testing.T, sdir string, sfile string,
 
 	curRev := string(bytes.TrimRight(revParseOut.Bytes(), "\n"))
 	if sign {
-		t.Logf("%s: signed commit %s script: %s\n",
-			curRev, sfile, script)
+		t.Logf("%s: signed commit: %v\n", curRev, sfiles)
 	} else {
-		t.Logf("%s: unsigned commit %s script: %s\n",
-			curRev, sfile, script)
+		t.Logf("%s: unsigned commit: %v\n", curRev, sfiles)
 	}
 
 	return curRev
@@ -156,12 +156,12 @@ func fileWriteCommit(t *testing.T, sdir string, sfile string,
 
 func fileWriteSignedCommit(t *testing.T, sdir string, sfile string,
 	script string) string {
-	return fileWriteCommit(t, sdir, sfile, script, true)
+	return fileWriteCommit(t, sdir, map[string]string{sfile: script}, true)
 }
 
 func fileWriteUnsignedCommit(t *testing.T, sdir string, sfile string,
 	script string) string {
-	return fileWriteCommit(t, sdir, sfile, script, false)
+	return fileWriteCommit(t, sdir, map[string]string{sfile: script}, false)
 }
 
 func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
@@ -375,9 +375,6 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 	for {
 		select {
 		case notes := <-notesChan:
-			if !notesWaitTimer.Stop() {
-				<-notesWaitTimer.C
-			}
 			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
 			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
 				t.Fatalf("%s does not match expected\n", snotes)
@@ -396,6 +393,9 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 				waitNotes(t, cloneDir, stdoutNotesRef,
 					curCommit, notesChan)
 			}()
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
 			notesWaitTimer.Reset(time.Second * 10)
 
 		case <-notesWaitTimer.C:
@@ -480,9 +480,6 @@ func TestNewHeadWhileStopped(t *testing.T) {
 	for {
 		select {
 		case notes := <-notesChan:
-			if !notesWaitTimer.Stop() {
-				<-notesWaitTimer.C
-			}
 			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
 			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
 				t.Fatalf("%s does not match expected\n", snotes)
@@ -517,6 +514,9 @@ func TestNewHeadWhileStopped(t *testing.T) {
 				waitNotes(t, cloneDir, stdoutNotesRef,
 					curCommit, notesChan)
 			}()
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
 			notesWaitTimer.Reset(time.Second * 10)
 
 		case <-notesWaitTimer.C:
@@ -629,9 +629,6 @@ func TestStopStart(t *testing.T) {
 	for {
 		select {
 		case notes := <-notesChan:
-			if !notesWaitTimer.Stop() {
-				<-notesWaitTimer.C
-			}
 			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
 			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
 				t.Fatalf("%s does not match expected\n", snotes)
@@ -647,7 +644,7 @@ func TestStopStart(t *testing.T) {
 
 			lp := logParser{
 				T:      t,
-				needle: []byte("failed to add git notes lock"),
+				needle: []byte("couldn't add git notes lock"),
 				ch:     grepChan,
 			}
 			log.SetOutput(&lp)
@@ -662,6 +659,9 @@ func TestStopStart(t *testing.T) {
 				eventLoop(&params, tdir, evExitChan)
 				wg.Done()
 			}()
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
 			notesWaitTimer.Reset(time.Second * 10)
 		case <-grepChan:
 			// restore log
@@ -676,6 +676,9 @@ func TestStopStart(t *testing.T) {
 				waitNotes(t, cloneDir, stdoutNotesRef,
 					curCommit, notesChan)
 			}()
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
 			notesWaitTimer.Reset(time.Second * 10)
 		case <-notesWaitTimer.C:
 			t.Fatal("timeout while waiting for icyCI notes\n")
@@ -774,9 +777,6 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 	for {
 		select {
 		case notes := <-notesChan:
-			if !notesWaitTimer.Stop() {
-				<-notesWaitTimer.C
-			}
 			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
 			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
 				t.Fatalf("%s does not match expected\n", snotes)
@@ -814,6 +814,9 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 				waitNotes(t, cloneDir, stdoutNotesRef,
 					curCommit, notesChan)
 			}()
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
 			notesWaitTimer.Reset(time.Second * 10)
 
 		case <-notesWaitTimer.C:
@@ -903,7 +906,10 @@ func TestMixUnsignedSigned(t *testing.T) {
 			}
 
 			if commitI >= maxCommitI {
-				return // all done
+				// Finished, tell icyCI eventLoop to end
+				evExitChan <- 1
+				wg.Wait()
+				return
 			}
 
 			lp := logParser{
@@ -933,6 +939,9 @@ func TestMixUnsignedSigned(t *testing.T) {
 				waitNotes(t, cloneDir, stdoutNotesRef,
 					curCommit, notesChan)
 			}()
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
 			notesWaitTimer.Reset(time.Second * 10)
 		case <-notesWaitTimer.C:
 			t.Fatal("timeout while waiting for icyCI notes\n")
