@@ -40,7 +40,6 @@ const (
 	verify
 	lock
 	run
-	save
 	push
 	cleanup
 	poll
@@ -63,31 +62,42 @@ var states = map[State]stateDesc{
 	verify:  {"verify branch HEAD", time.Duration(1 * time.Minute)},
 	lock:    {"lock commit for testing", time.Duration(5 * time.Minute)},
 	run:     {"run test", time.Duration(2 * time.Hour)},
-	save:    {"save test output as git notes", time.Duration(1 * time.Minute)},
 	push:    {"push test output notes", time.Duration(10 * time.Minute)},
 	cleanup: {"cleanup test artifacts", time.Duration(5 * time.Minute)},
 	poll:    {"poll source for new commits", 0},
 }
 
-const lockNotesRef = "refs/notes/icyci.locked"
-const stdoutNotesRef = "refs/notes/icyci.stdout"
-const stderrNotesRef = "refs/notes/icyci.stderr"
-const allNotesGlob = "refs/notes/*"
+const (
+	lockNotesRef   = "refs/notes/icyci.locked"
+	stdoutNotesRef = "refs/notes/icyci.stdout"
+	stderrNotesRef = "refs/notes/icyci.stderr"
+	resultsRemote  = "results"
+)
 
-func cloneRepo(ch chan<- error, workDir string, u *url.URL,
-	branch string, targetDir string) {
+func cloneRepo(ch chan<- error, workDir string, sUrl *url.URL,
+	branch string, rUrl *url.URL, targetDir string) {
 	// TODO branch is not sanitized. Ignore submodules for now.
 	if branch == "" {
 		log.Fatal("empty branch name")
 	}
 	gitArgs := []string{"clone", "--no-checkout", "--single-branch",
-		"--branch", branch, u.String(), targetDir}
+		"--branch", branch, sUrl.String(), targetDir}
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = workDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Run()
 	if err != nil {
 		log.Printf("git %v failed: %v", gitArgs, err)
+		goto err_out
+	}
+
+	cmd = exec.Command("git", "remote", "add", resultsRemote,
+		rUrl.String())
+	cmd.Dir = targetDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Printf("git failed: %v", err)
 		goto err_out
 	}
 err_out:
@@ -151,37 +161,52 @@ err_out:
 }
 
 // lock to flags us as owner for testing this commit
-func pushLock(ch chan<- error, sourceDir string, branch string,
-	u *url.URL) {
+func pushLock(ch chan<- error, sourceDir string, branch string) {
+	var err error = nil
 
-	cmd := exec.Command("git", "notes", "--ref", lockNotesRef, "add", "-m",
-		"this commit is being tested by icyCI",
-		"origin/"+branch)
-	cmd.Dir = sourceDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		log.Printf("failed to add git notes lock: %v", err)
-		goto err_out
-	}
+	for retries := 10; retries > 0; retries-- {
 
-	cmd = exec.Command("git", "push", u.String(), lockNotesRef)
-	cmd.Dir = sourceDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		log.Printf("failed to push git notes lock: %v", err)
-		// delete local lock note if push failed
-		cmd = exec.Command("git", "notes", "--ref", lockNotesRef,
-			"remove", "origin/"+branch)
+		// fetch may fail if no lock has ever been pushed
+		cmd := exec.Command("git", "fetch", resultsRemote,
+			"+"+lockNotesRef+":"+lockNotesRef)
 		cmd.Dir = sourceDir
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		if cmd.Run() != nil {
-			log.Print("ignoring failure to cancel git notes lock")
+		err = cmd.Run()
+		if err != nil {
+			log.Print("ignoring failure to fetch git notes lock")
 		}
-		goto err_out
+
+		// Without -f, "add" will fail if an existing note exists for
+		// this commit. Failure indicates that the commit has been
+		// tested or is currently being tested by another instance.
+		cmd = exec.Command(
+			"git", "notes", "--ref", lockNotesRef, "add", "-m",
+			time.Now().String()+": this commit is being tested by icyCI",
+			"origin/"+branch)
+		cmd.Dir = sourceDir
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			log.Printf("couldn't add git notes lock: %v", err)
+			goto err_out
+		}
+
+		cmd = exec.Command("git", "push", resultsRemote, lockNotesRef)
+		cmd.Dir = sourceDir
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		err = cmd.Run()
+		if err == nil {
+			log.Printf("successfully pushed git notes lock")
+			break
+		}
+
+		if retries > 1 {
+			log.Printf("retrying git notes lock after sleep")
+			time.Sleep(1 * time.Second)
+		}
 	}
 err_out:
+	log.Printf("leaving push lock with err: %v", err)
 	ch <- err
 }
 
@@ -247,7 +272,9 @@ err_out:
 		err:          err}
 }
 
-func addNotes(ch chan<- error, sourceDir string, branch string,
+// push captured stdout and stderr notes to the results repository.
+func pushResults(ch chan<- error, sourceDir string,
+	branch string, tag string, pushSrcToRslts bool,
 	stdoutFile string, stderrFile string) {
 
 	var err error = nil
@@ -256,43 +283,56 @@ func addNotes(ch chan<- error, sourceDir string, branch string,
 		msg string
 	}
 
-	for _, note := range []notesOut{
-		{ns: stdoutNotesRef, msg: stdoutFile},
-		{ns: stderrNotesRef, msg: stderrFile}} {
+	for retries := 10; retries > 0; retries-- {
+		// fetch ensures we don't conflict, may fail if never pushed
+		cmd := exec.Command("git", "fetch", resultsRemote,
+			"+"+stdoutNotesRef+":"+stdoutNotesRef,
+			"+"+stderrNotesRef+":"+stderrNotesRef)
+		cmd.Dir = sourceDir
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			log.Print("ignoring failure to fetch output git notes")
+		}
 
-		gitArgs := []string{"notes", "--ref", note.ns, "add",
-			"--allow-empty", "-F", note.msg, "origin/" + branch}
-		cmd := exec.Command("git", gitArgs...)
+		for _, note := range []notesOut{
+			{ns: stdoutNotesRef, msg: stdoutFile},
+			{ns: stderrNotesRef, msg: stderrFile}} {
+
+			gitArgs := []string{"notes", "--ref", note.ns, "add",
+				"--allow-empty", "-F", note.msg,
+				"origin/" + branch}
+			cmd := exec.Command("git", gitArgs...)
+			cmd.Dir = sourceDir
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			err = cmd.Run()
+			if err != nil {
+				log.Printf("git %v failed: %v", gitArgs, err)
+				goto err_out
+			}
+		}
+
+		gitArgs := []string{"push", resultsRemote, stdoutNotesRef,
+			stderrNotesRef}
+		if pushSrcToRslts {
+			gitArgs = append(gitArgs, "HEAD:refs/heads/"+branch)
+			if tag != "" {
+				gitArgs = append(gitArgs, "refs/tags/"+tag)
+			}
+		}
+		cmd = exec.Command("git", gitArgs...)
 		cmd.Dir = sourceDir
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err = cmd.Run()
-		if err != nil {
-			log.Printf("git %v failed: %v", gitArgs, err)
-			goto err_out
+		if err == nil {
+			log.Printf("successfully pushed git notes lock")
+			break
 		}
-	}
-err_out:
-	ch <- err
-}
 
-// push captured stdout and stderr notes to the results repository.
-func pushResults(ch chan<- error, sourceDir string,
-	branch string, tag string, u *url.URL, pushSrcToRslts bool) {
-
-	gitArgs := []string{"push", u.String(), allNotesGlob}
-	if pushSrcToRslts {
-		gitArgs = append(gitArgs, "HEAD:refs/heads/"+branch)
-		if tag != "" {
-			gitArgs = append(gitArgs, "refs/tags/"+tag)
+		if retries > 1 {
+			log.Printf("retrying output git notes after sleep")
+			time.Sleep(1 * time.Second)
 		}
-	}
-	cmd := exec.Command("git", gitArgs...)
-	cmd.Dir = sourceDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		log.Printf("git failed: %v", err)
-		goto err_out
 	}
 err_out:
 	ch <- err
@@ -426,7 +466,6 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 	verifyChan := make(chan verifyCompletion)
 	pushLockChan := make(chan error)
 	runScriptChan := make(chan runScriptCompletion)
-	addNotesChan := make(chan error)
 	pushResultsChan := make(chan error)
 	cleanupChan := make(chan error)
 	pollChan := make(chan error)
@@ -435,7 +474,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 	transitionState(clone, &ls)
 	go func() {
 		cloneRepo(cloneChan, workDir, params.sourceUrl,
-			params.sourceBranch, sourceDir)
+			params.sourceBranch, params.resultsUrl, sourceDir)
 	}()
 
 	for {
@@ -468,7 +507,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			transitionState(lock, &ls)
 			go func() {
 				pushLock(pushLockChan, sourceDir,
-					params.sourceBranch, params.resultsUrl)
+					params.sourceBranch)
 			}()
 
 		case pushLockErr := <-pushLockChan:
@@ -497,24 +536,13 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 					runScriptCmpl.scriptStatus)
 			}
 
-			transitionState(save, &ls)
-			go func() {
-				addNotes(addNotesChan, sourceDir,
-					params.sourceBranch,
-					runScriptCmpl.stdoutFile,
-					runScriptCmpl.stderrFile)
-			}()
-		case addNotesErr := <-addNotesChan:
-			if addNotesErr != nil {
-				log.Fatal(addNotesErr)
-			}
-			log.Print("git notes added successfully\n")
-
 			transitionState(push, &ls)
 			go func() {
 				pushResults(pushResultsChan, sourceDir,
 					params.sourceBranch, ls.verifiedTag,
-					params.resultsUrl, params.pushSrcToRslts)
+					params.pushSrcToRslts,
+					runScriptCmpl.stdoutFile,
+					runScriptCmpl.stderrFile)
 			}()
 		case pushResultsErr := <-pushResultsChan:
 			if pushResultsErr != nil {
@@ -551,7 +579,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			}()
 		case <-ls.transitionTimer.C:
 			log.Fatalf("State %v transition timeout!", ls.state)
-		case <- exitChan:
+		case <-exitChan:
 			log.Printf("Got exit message while in state %d\n",
 				ls.state)
 			return
