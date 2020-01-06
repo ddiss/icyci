@@ -948,3 +948,258 @@ func TestMixUnsignedSigned(t *testing.T) {
 		}
 	}
 }
+
+func waitSpinlk(t *testing.T, spinlkPath string, spinlkChan chan<- bool) {
+
+	t.Logf("waiting for spinlk file at: %s", spinlkPath)
+	for {
+		_, err := os.Stat(spinlkPath)
+		if err == nil {
+			t.Logf("spinlk file present at: %s", spinlkPath)
+			spinlkChan <- true
+			return
+		}
+
+		time.Sleep(time.Second * 1)
+	}
+}
+
+type instanceState struct {
+	id         string
+	tmpDir     string
+	spinlk     string
+	spinlkChan chan bool
+	wg         sync.WaitGroup
+	evExitChan chan int
+	commit     string
+	commitI    int
+	notesChan  chan bytes.Buffer
+	gotNotes   bool
+	params     cliParams
+}
+
+type commitState struct {
+	nextCommitI int
+	m           map[int]string
+}
+
+func handleSpinlk(t *testing.T, sdir string, cloneDir string,
+	iWin *instanceState, iLost *instanceState,
+	cs *commitState) {
+
+	// iWin instance won the race to push a lock and start testScript.
+	// It's is blocked awaiting spinlk removal
+	iWin.commitI = cs.nextCommitI - 1
+	iWin.commit = cs.m[iWin.commitI]
+	_, err := os.Stat(iLost.spinlk)
+	if err == nil {
+		t.Logf("%s spinlk with %s present, proceeding",
+			iWin.spinlk, iLost.spinlk)
+		if iWin.commitI != iLost.commitI+1 {
+			t.Fatalf("iWin.commitI %d != iLost.commitI+1 %d",
+				iWin.commitI, iLost.commitI+1)
+		}
+
+		// iLost is also blocked on a spinlk from a prior commit.
+		// Remove both spinlocks and wait for notes
+		os.Remove(iWin.spinlk)
+		os.Remove(iLost.spinlk)
+		go func() {
+			// sync - remote update can't be run concurrently in the
+			// same cloneDir
+			waitNotes(t, cloneDir, stdoutNotesRef,
+				iWin.commit, iWin.notesChan)
+			waitNotes(t, cloneDir, stdoutNotesRef,
+				iLost.commit, iLost.notesChan)
+		}()
+		return
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+
+	// iLost is still polling, so a new commit should be picked up by it
+	fm := map[string]string{
+		iWin.params.testScript: `echo "` + iWin.id + `: commitI: ` +
+			strconv.Itoa(cs.nextCommitI) + `"
+			touch ` + iWin.spinlk + `
+			while [ -f ` + iWin.spinlk + ` ]; do sleep 1; done`,
+		iLost.params.testScript: `echo "` + iLost.id + `: commitI: ` +
+			strconv.Itoa(cs.nextCommitI) + `"
+			touch ` + iLost.spinlk + `
+			while [ -f ` + iLost.spinlk + ` ]; do sleep 1; done`}
+	cs.m[cs.nextCommitI] = fileWriteCommit(t, sdir, fm, true)
+	cs.nextCommitI++
+}
+
+// - test multiple concurrent icyCI instances running against the same source
+// - instances use "spinlk" files for synchronisation during testing
+// - commit changes and start both (i1 and i2) instances
+// - one instance picks up the new commit and runs its testScript
+// - the other instance remains in the icyci git fetch loop
+// - testScript creates a spinlk file and waits for its removal
+// - waitSpinlk() detects the instance blocked by spinlk
+// - commit another change, to be picked up by the other instance in the git
+//   fetch loop
+// - wait for the second spinlk file to appear
+// - remove both spinlk files and wait for notes
+func TestMultiInstance(t *testing.T) {
+	cs := commitState{
+		nextCommitI: 0,
+		m:           make(map[int]string),
+	}
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir, rdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	surl, err := url.Parse(sdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rurl, err := url.Parse(rdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	i1 := instanceState{id: "i1"}
+	i2 := instanceState{id: "i2"}
+	for _, i := range []*instanceState{&i1, &i2} {
+		i.tmpDir = path.Join(tdir, i.id)
+		err = os.Mkdir(i.tmpDir, 0755)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// spinlk files block instances while running the test script
+		i.spinlk = path.Join(i.tmpDir, i.id+"_spinlk")
+
+		// each instance uses a separate testScript, committed below...
+		i.params = cliParams{
+			sourceUrl:      surl,
+			sourceBranch:   "mybranch",
+			testScript:     "./" + i.id + "_test.sh",
+			resultsUrl:     rurl,
+			pushSrcToRslts: false,
+			pollIntervalS:  1,
+		}
+
+		i.evExitChan = make(chan int)
+		i.spinlkChan = make(chan bool)
+		i.notesChan = make(chan bytes.Buffer)
+	}
+
+	fm := map[string]string{
+		"i1_test.sh": `echo "i1: commitI: ` + strconv.Itoa(cs.nextCommitI) + `"
+			touch ` + i1.spinlk + `
+			while [ -f ` + i1.spinlk + ` ]; do sleep 1; done`,
+		"i2_test.sh": `echo "i2: commitI: ` + strconv.Itoa(cs.nextCommitI) + `"
+			touch ` + i2.spinlk + `
+			while [ -f ` + i2.spinlk + ` ]; do sleep 1; done`}
+	cs.m[cs.nextCommitI] = fileWriteCommit(t, sdir, fm, true)
+	cs.nextCommitI++
+
+	i1.wg.Add(1)
+	go func() {
+		t.Log("starting i1 icyCI eventLoop")
+		eventLoop(&i1.params, i1.tmpDir, i1.evExitChan)
+		i1.wg.Done()
+	}()
+	i2.wg.Add(1)
+	go func() {
+		t.Log("starting i2 icyCI eventLoop")
+		eventLoop(&i2.params, i2.tmpDir, i2.evExitChan)
+		i2.wg.Done()
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for either instance to create their spinlk file, which
+	// signifies that they've won the race to obtain the icyci lock.
+	go func() {
+		waitSpinlk(t, i1.spinlk, i1.spinlkChan)
+	}()
+	go func() {
+		waitSpinlk(t, i2.spinlk, i2.spinlkChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case <-i1.spinlkChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			handleSpinlk(t, sdir, cloneDir, &i1, &i2, &cs)
+		case <-i2.spinlkChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			handleSpinlk(t, sdir, cloneDir, &i2, &i1, &cs)
+		case n1 := <-i1.notesChan:
+			t.Log("i1 complete")
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			snotes := string(bytes.TrimRight(n1.Bytes(), "\n"))
+			expected := "i1: commitI: " + strconv.Itoa(i1.commitI)
+			if snotes != expected {
+				t.Fatalf("\"%s\" doesn't match expected \"%s\"",
+					snotes, expected)
+			}
+			i1.gotNotes = true
+		case n2 := <-i2.notesChan:
+			t.Log("i2 complete")
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			snotes := string(bytes.TrimRight(n2.Bytes(), "\n"))
+			expected := "i2: commitI: " + strconv.Itoa(i2.commitI)
+			if snotes != expected {
+				t.Fatalf("\"%s\" doesn't match expected \"%s\"",
+					snotes, expected)
+			}
+			i2.gotNotes = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+
+		if i1.gotNotes && i2.gotNotes {
+			// TODO extend test here
+
+			// Finished, tell icyCI eventLoop to end
+			i1.evExitChan <- 1
+			i2.evExitChan <- 1
+			i1.wg.Wait()
+			i2.wg.Wait()
+			return
+		}
+	}
+}
