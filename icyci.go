@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -383,10 +384,11 @@ err_out:
 	return err
 }
 
-func pollSource(ch chan<- error, sourceDir string, branch string,
+func pollSource(retCh chan<- error, exitCh chan bool, sourceDir string, branch string,
 	pollIntervalS uint64) {
 
 	var err error = nil
+	var pollTimer *time.Timer
 	consecutiveFetchFail := 0
 	const maxConsecutiveFetchFails = 10
 
@@ -398,33 +400,43 @@ func pollSource(ch chan<- error, sourceDir string, branch string,
 	log.Printf("Entering poll loop awaiting new %s commits at %s\n",
 		branch, preFetchRev)
 
+	pollTimer = time.NewTimer(time.Second * time.Duration(pollIntervalS))
 	for {
-		time.Sleep(time.Duration(time.Duration(pollIntervalS) * time.Second))
+		select {
+		case <-exitCh:
+			// event loop sends msg
+			err = errors.New("exit requested")
+			goto err_out
 
-		err = pollFetch(sourceDir, branch)
-		if err != nil {
-			consecutiveFetchFail++
-			if consecutiveFetchFail > maxConsecutiveFetchFails {
-				break
+		case <-pollTimer.C:
+			pollTimer.Reset(time.Second * time.Duration(pollIntervalS))
+
+			err = pollFetch(sourceDir, branch)
+			if err != nil {
+				consecutiveFetchFail++
+				if consecutiveFetchFail > maxConsecutiveFetchFails {
+					goto err_out
+				}
+				log.Printf("Retrying; %d of maximum %d fetch failures\n",
+					consecutiveFetchFail, maxConsecutiveFetchFails)
+				continue
 			}
-			log.Printf("Retrying; %d of maximum %d fetch failures\n",
-				consecutiveFetchFail, maxConsecutiveFetchFails)
-			continue
-		}
-		consecutiveFetchFail = 0
+			consecutiveFetchFail = 0
 
-		postFetchRev, err := pollGetRev(sourceDir, branch)
-		if err != nil {
-			break
-		}
-		if preFetchRev != postFetchRev {
-			log.Printf("detected branch %s change %s -> %s\n",
-				branch, preFetchRev, postFetchRev)
-			break
+			postFetchRev, err := pollGetRev(sourceDir, branch)
+			if err != nil {
+				goto err_out
+			}
+			if preFetchRev != postFetchRev {
+				log.Printf("detected branch %s change %s -> %s\n",
+					branch, preFetchRev, postFetchRev)
+				err = nil
+				goto err_out
+			}
 		}
 	}
 err_out:
-	ch <- err
+	retCh <- err
 }
 
 func transitionState(newState State, ls *loopState) {
@@ -468,7 +480,8 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 	runScriptChan := make(chan runScriptCompletion)
 	pushResultsChan := make(chan error)
 	cleanupChan := make(chan error)
-	pollChan := make(chan error)
+	pollRetChan := make(chan error)
+	pollExitChan := make(chan bool)
 
 	var ls loopState
 	transitionState(clone, &ls)
@@ -495,7 +508,8 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			if verifyCmpl.err != nil {
 				transitionState(poll, &ls)
 				go func() {
-					pollSource(pollChan, sourceDir,
+					pollSource(pollRetChan, pollExitChan,
+						sourceDir,
 						params.sourceBranch,
 						params.pollIntervalS)
 				}()
@@ -514,7 +528,8 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			if pushLockErr != nil {
 				transitionState(poll, &ls)
 				go func() {
-					pollSource(pollChan, sourceDir,
+					pollSource(pollRetChan, pollExitChan,
+						sourceDir,
 						params.sourceBranch,
 						params.pollIntervalS)
 				}()
@@ -562,11 +577,12 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 
 			transitionState(poll, &ls)
 			go func() {
-				pollSource(pollChan, sourceDir,
+				pollSource(pollRetChan, pollExitChan,
+					sourceDir,
 					params.sourceBranch,
 					params.pollIntervalS)
 			}()
-		case pollErr := <-pollChan:
+		case pollErr := <-pollRetChan:
 			if pollErr != nil {
 				log.Fatal(pollErr)
 			}
@@ -582,6 +598,11 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 		case <-exitChan:
 			log.Printf("Got exit message while in state %d\n",
 				ls.state)
+			if ls.state == poll {
+				pollExitChan <- true
+				log.Print("waiting for poll routine to exit\n")
+				<-pollRetChan
+			}
 			return
 		}
 	}
