@@ -70,8 +70,8 @@ var states = map[State]stateDesc{
 
 const (
 	lockNotesRef   = "refs/notes/icyci.locked"
-	stdoutNotesRef = "refs/notes/icyci.stdout"
-	stderrNotesRef = "refs/notes/icyci.stderr"
+	stdoutNotesRef = "refs/notes/icyci.output.stdout"
+	stderrNotesRef = "refs/notes/icyci.output.stderr"
 	passedNotesRef = "refs/notes/icyci.result.passed"
 	failedNotesRef = "refs/notes/icyci.result.failed"
 	resultsRemote  = "results"
