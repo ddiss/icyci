@@ -72,6 +72,8 @@ const (
 	lockNotesRef   = "refs/notes/icyci.locked"
 	stdoutNotesRef = "refs/notes/icyci.stdout"
 	stderrNotesRef = "refs/notes/icyci.stderr"
+	passedNotesRef = "refs/notes/icyci.result.passed"
+	failedNotesRef = "refs/notes/icyci.result.failed"
 	resultsRemote  = "results"
 )
 
@@ -212,8 +214,9 @@ err_out:
 }
 
 type runScriptCompletion struct {
-	stdoutFile   string
-	stderrFile   string
+	stdoutF      string
+	stderrF      string
+	summaryF     string
 	scriptStatus error
 	err          error
 }
@@ -222,6 +225,7 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	branch string, testScript string) {
 	var stdoutF *os.File
 	var stderrF *os.File
+	var msg string
 	cmpl := runScriptCompletion{}
 
 	cmd := exec.Command("git", "checkout", "--quiet", "origin/"+branch)
@@ -233,16 +237,16 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 		goto err_out
 	}
 
-	cmpl.stdoutFile = path.Join(workDir, "script.stdout")
-	stdoutF, err = os.Create(cmpl.stdoutFile)
+	cmpl.stdoutF = path.Join(workDir, "script.stdout")
+	stdoutF, err = os.Create(cmpl.stdoutF)
 	if err != nil {
 		log.Printf("stdout log creation failed: %v", err)
 		goto err_out
 	}
 	defer stdoutF.Close()
 
-	cmpl.stderrFile = path.Join(workDir, "script.stderr")
-	stderrF, err = os.Create(cmpl.stderrFile)
+	cmpl.stderrF = path.Join(workDir, "script.stderr")
+	stderrF, err = os.Create(cmpl.stderrF)
 	if err != nil {
 		log.Printf("stderr log creation failed: %v", err)
 		goto err_out
@@ -263,12 +267,27 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	stdoutF.Sync()
 	stderrF.Sync()
 
+	cmpl.summaryF = path.Join(workDir, "script.summary")
+	if cmpl.scriptStatus == nil {
+		msg = fmt.Sprintf("%s completed successfully", testScript)
+	} else {
+		msg = fmt.Sprintf("%s failed: %v\nSee %s and %s for details",
+			testScript, cmpl.scriptStatus,
+			stdoutNotesRef, stderrNotesRef)
+	}
+	log.Print(msg + "\n")
+	err = ioutil.WriteFile(cmpl.summaryF, []byte(msg), os.FileMode(0644))
+	if err != nil {
+		goto err_out
+	}
+
 	ch <- cmpl
 	return
 err_out:
 	ch <- runScriptCompletion{
-		stdoutFile:   "",
-		stderrFile:   "",
+		stdoutF:      "",
+		stderrF:      "",
+		summaryF:     "",
 		scriptStatus: err,
 		err:          err}
 }
@@ -276,19 +295,27 @@ err_out:
 // push captured stdout and stderr notes to the results repository.
 func pushResults(ch chan<- error, sourceDir string,
 	branch string, tag string, pushSrcToRslts bool,
-	stdoutFile string, stderrFile string) {
+	cmpl runScriptCompletion) {
 
 	var err error = nil
 	type notesOut struct {
 		ns  string
 		msg string
 	}
+	var res notesOut
+
+	if cmpl.scriptStatus == nil {
+		res = notesOut{ns: passedNotesRef, msg: cmpl.summaryF}
+	} else {
+		res = notesOut{ns: failedNotesRef, msg: cmpl.summaryF}
+	}
 
 	for retries := 10; retries > 0; retries-- {
 		// fetch ensures we don't conflict, may fail if never pushed
 		cmd := exec.Command("git", "fetch", resultsRemote,
 			"+"+stdoutNotesRef+":"+stdoutNotesRef,
-			"+"+stderrNotesRef+":"+stderrNotesRef)
+			"+"+stderrNotesRef+":"+stderrNotesRef,
+			"+"+res.ns+":"+res.ns)
 		cmd.Dir = sourceDir
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err := cmd.Run()
@@ -296,9 +323,9 @@ func pushResults(ch chan<- error, sourceDir string,
 			log.Print("ignoring failure to fetch output git notes")
 		}
 
-		for _, note := range []notesOut{
-			{ns: stdoutNotesRef, msg: stdoutFile},
-			{ns: stderrNotesRef, msg: stderrFile}} {
+		for _, note := range []notesOut{res,
+			{ns: stdoutNotesRef, msg: cmpl.stdoutF},
+			{ns: stderrNotesRef, msg: cmpl.stderrF}} {
 
 			gitArgs := []string{"notes", "--ref", note.ns, "add",
 				"--allow-empty", "-F", note.msg,
@@ -313,8 +340,8 @@ func pushResults(ch chan<- error, sourceDir string,
 			}
 		}
 
-		gitArgs := []string{"push", resultsRemote, stdoutNotesRef,
-			stderrNotesRef}
+		gitArgs := []string{"push", resultsRemote, res.ns,
+			stdoutNotesRef, stderrNotesRef}
 		if pushSrcToRslts {
 			gitArgs = append(gitArgs, "HEAD:refs/heads/"+branch)
 			if tag != "" {
@@ -544,20 +571,12 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			if runScriptCmpl.err != nil {
 				log.Fatal(runScriptCmpl.err)
 			}
-			if runScriptCmpl.scriptStatus == nil {
-				log.Print("test script completed successfully\n")
-			} else {
-				log.Printf("test script failed: %v\n",
-					runScriptCmpl.scriptStatus)
-			}
 
 			transitionState(push, &ls)
 			go func() {
 				pushResults(pushResultsChan, sourceDir,
 					params.sourceBranch, ls.verifiedTag,
-					params.pushSrcToRslts,
-					runScriptCmpl.stdoutFile,
-					runScriptCmpl.stderrFile)
+					params.pushSrcToRslts, runScriptCmpl)
 			}()
 		case pushResultsErr := <-pushResultsChan:
 			if pushResultsErr != nil {
