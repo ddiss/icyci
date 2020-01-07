@@ -1031,6 +1031,25 @@ func handleSpinlk(t *testing.T, sdir string, cloneDir string,
 	cs.nextCommitI++
 }
 
+func checkResults(t *testing.T, repoDir string, commit string, script string) {
+	var notesOut bytes.Buffer
+
+	cmd := exec.Command("git", "notes", "--ref="+passedNotesRef, "show",
+		"--", commit)
+	cmd.Dir = repoDir
+	cmd.Stdout = &notesOut
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snotes := string(bytes.TrimRight(notesOut.Bytes(), "\n"))
+	if snotes != script+" completed successfully" {
+		t.Fatalf("%s does not match expected\n", snotes)
+	}
+	t.Logf("%s matches expected: %s", passedNotesRef, snotes)
+}
+
 // - test multiple concurrent icyCI instances running against the same source
 // - instances use "spinlk" files for synchronisation during testing
 // - commit changes and start both (i1 and i2) instances
@@ -1192,13 +1211,13 @@ func TestMultiInstance(t *testing.T) {
 		}
 
 		if i1.gotNotes && i2.gotNotes {
-			// TODO extend test here
-
-			// Finished, tell icyCI eventLoop to end
-			i1.evExitChan <- 1
-			i2.evExitChan <- 1
-			i1.wg.Wait()
-			i2.wg.Wait()
+			for _, i := range []*instanceState{&i1, &i2} {
+				checkResults(t, cloneDir, i.commit,
+					i.params.testScript)
+				// tell icyCI eventLoop to end
+				i.evExitChan <- 1
+				i.wg.Wait()
+			}
 			return
 		}
 	}
