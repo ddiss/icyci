@@ -120,6 +120,11 @@ Future
 - Improve self test functionality
 - Improve documentation
 - Support multiple branches within one instance
+  - Determine applicable via:
+```
+git for-each-ref --no-contains=X --count=1 --sort=-committerdate refs/heads/
+```
+- push results as static website, in addition to git-notes
 - Save and push build/test artifacts, in addition to output
 - Periodically push progress while testing
 - Improve logging
