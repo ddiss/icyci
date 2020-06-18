@@ -500,42 +500,89 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 
 	sourceDir := path.Join(workDir, "source")
 
-	// TODO reuse channels instead of creating one per activity
-	cloneChan := make(chan error)
+	cmplChan := make(chan error)
 	verifyChan := make(chan verifyCompletion)
-	pushLockChan := make(chan error)
 	runScriptChan := make(chan runScriptCompletion)
-	pushResultsChan := make(chan error)
-	cleanupChan := make(chan error)
-	pollRetChan := make(chan error)
 	pollExitChan := make(chan bool)
 
 	var ls loopState
 	transitionState(clone, &ls)
 	go func() {
-		cloneRepo(cloneChan, workDir, params.sourceUrl,
+		cloneRepo(cmplChan, workDir, params.sourceUrl,
 			params.sourceBranch, params.resultsUrl, sourceDir)
 	}()
 
 	for {
 		select {
-		case cloneErr := <-cloneChan:
-			if cloneErr != nil {
-				log.Fatal(cloneErr)
+		// generic competion handler
+		case err := <-cmplChan:
+			if err != nil {
+				log.Printf("%s failed\n", states[ls.state].desc)
+				if ls.state == lock {
+					// lock errors transition to poll state
+					transitionState(poll, &ls)
+					go func() {
+						pollSource(cmplChan,
+							pollExitChan,
+							sourceDir,
+							params.sourceBranch,
+							params.pollIntervalS)
+					}()
+					continue
+				}
+				// other errors are fatal
+				log.Fatal(err)
 			}
-			log.Print("clone completed successfully\n")
 
-			transitionState(verify, &ls)
-			go func() {
-				verifyRepo(verifyChan, sourceDir,
-					params.sourceBranch)
-			}()
+			log.Printf("%s completed successfully\n",
+				states[ls.state].desc)
+			switch ls.state {
+			case clone:
+				transitionState(verify, &ls)
+				go func() {
+					verifyRepo(verifyChan, sourceDir,
+						params.sourceBranch)
+				}()
+			// verify handled via separate chan, transitions to lock
+			// state
+			case lock:
+				transitionState(run, &ls)
+				go func() {
+					runScript(runScriptChan, workDir,
+						sourceDir, params.sourceBranch,
+						params.testScript)
+				}()
+			// run script completion handled via separate chan,
+			// transitions to push state
+			case push:
+				transitionState(cleanup, &ls)
+				go func() {
+					cleanupSource(cmplChan, sourceDir)
+				}()
+			case cleanup:
+				transitionState(poll, &ls)
+				go func() {
+					pollSource(cmplChan, pollExitChan,
+						sourceDir,
+						params.sourceBranch,
+						params.pollIntervalS)
+				}()
+			case poll:
+				transitionState(verify, &ls)
+				go func() {
+					verifyRepo(verifyChan, sourceDir,
+						params.sourceBranch)
+				}()
+			default:
+				log.Fatalf("unhandled completion in state %s",
+					states[ls.state].desc)
+			}
 		case verifyCmpl := <-verifyChan:
 			ls.verifiedTag = ""
 			if verifyCmpl.err != nil {
 				transitionState(poll, &ls)
 				go func() {
-					pollSource(pollRetChan, pollExitChan,
+					pollSource(cmplChan, pollExitChan,
 						sourceDir,
 						params.sourceBranch,
 						params.pollIntervalS)
@@ -547,26 +594,10 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 
 			transitionState(lock, &ls)
 			go func() {
-				pushLock(pushLockChan, sourceDir,
+				pushLock(cmplChan, sourceDir,
 					params.sourceBranch)
 			}()
 
-		case pushLockErr := <-pushLockChan:
-			if pushLockErr != nil {
-				transitionState(poll, &ls)
-				go func() {
-					pollSource(pollRetChan, pollExitChan,
-						sourceDir,
-						params.sourceBranch,
-						params.pollIntervalS)
-				}()
-				continue
-			}
-			transitionState(run, &ls)
-			go func() {
-				runScript(runScriptChan, workDir, sourceDir,
-					params.sourceBranch, params.testScript)
-			}()
 		case runScriptCmpl := <-runScriptChan:
 			if runScriptCmpl.err != nil {
 				log.Fatal(runScriptCmpl.err)
@@ -574,43 +605,9 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 
 			transitionState(push, &ls)
 			go func() {
-				pushResults(pushResultsChan, sourceDir,
+				pushResults(cmplChan, sourceDir,
 					params.sourceBranch, ls.verifiedTag,
 					params.pushSrcToRslts, runScriptCmpl)
-			}()
-		case pushResultsErr := <-pushResultsChan:
-			if pushResultsErr != nil {
-				log.Fatal(pushResultsErr)
-			}
-			log.Print("git push completed successfully\n")
-
-			transitionState(cleanup, &ls)
-			go func() {
-				cleanupSource(cleanupChan, sourceDir)
-			}()
-		case cleanupErr := <-cleanupChan:
-			if cleanupErr != nil {
-				log.Fatal(cleanupErr)
-			}
-			log.Print("cleanup completed successfully\n")
-
-			transitionState(poll, &ls)
-			go func() {
-				pollSource(pollRetChan, pollExitChan,
-					sourceDir,
-					params.sourceBranch,
-					params.pollIntervalS)
-			}()
-		case pollErr := <-pollRetChan:
-			if pollErr != nil {
-				log.Fatal(pollErr)
-			}
-			log.Print("poll / fetch loop returned success\n")
-
-			transitionState(verify, &ls)
-			go func() {
-				verifyRepo(verifyChan, sourceDir,
-					params.sourceBranch)
 			}()
 		case <-ls.transitionTimer.C:
 			log.Fatalf("State %v transition timeout!", ls.state)
@@ -620,7 +617,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			if ls.state == poll {
 				pollExitChan <- true
 				log.Print("waiting for poll routine to exit\n")
-				<-pollRetChan
+				<-cmplChan
 			}
 			return
 		}
