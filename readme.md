@@ -1,8 +1,8 @@
 icyCI
 =====
 
-icyCI has one job:
-- Pull source from a Git repository
+icyCI has one purpose:
+- Pull and verify source from a Git repository
 - Run a build/test/whatever script
 - Push script results to a Git repository
 - Poll for new source changes
@@ -11,14 +11,14 @@ It differs from other CI utilities in a few ways:
 
 | What?          | How?                                                        |
 | -------------- | ----------------------------------------------------------- |
-| Lightweight    | Single binary with Git and Go standard library dependencies |
-| Secure         | Only proceeds if branch GPG signature can be verified       |
+| Lightweight    | Single Go binary with a Git core tools dependency.          |
+| Secure         | Only proceeds if branch GPG signature can be verified.      |
 | Trustless      | Doesn't need push access to source repositories. Rootless.  |
-| Vendor Neutral | Only relies on standard Git features and protocols          |
-| Fast           | Asynchronous, event based architecture                      |
-| Informative    | Results published as git-notes, viewable from git log       |
+| Vendor Neutral | Only relies on standard Git features and protocols.         |
+| Fast           | Asynchronous, event based architecture.                     |
+| Informative    | Results published as git-notes, viewable from git log.      |
 | Simple         | Set and forget. Polls and tests new changes automatically.  |
-| Distributed    | Can cooperatively run on a single or multiple hosts         |
+| Distributed    | Can cooperatively run on a single or multiple hosts.        |
 
 
 Usage
@@ -70,7 +70,7 @@ cd ~/linux-results
 git fetch origin "refs/notes/*:refs/notes/*"
 ```
 
-or alternatively add the *results-repo* as a new remote to an existing clone
+...or alternatively add the *results-repo* as a new remote to an existing clone
 of the *source-repo*:
 ```sh
 # The linux directory is an existing clone of
