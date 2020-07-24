@@ -87,6 +87,9 @@ The icyCI test results can be viewed alongside the regular git log output with:
 git log --show-notes="*"
 ```
 
+icyCI can be run as a systemd service. For details, see
+[docs/systemd-usage.md](docs/systemd-usage.md).
+
 
 Architecture
 ------------
