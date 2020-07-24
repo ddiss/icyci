@@ -24,6 +24,17 @@ func usage() {
 	flag.PrintDefaults()
 }
 
+var buildVer string // set via -ldflags "-X main.buildVer=<version>"
+
+func vers() {
+	ver := buildVer
+	if ver == "" {
+		ver = "version unknown"
+	}
+
+	fmt.Printf("icyCI %s\n", ver)
+}
+
 type cliParams struct {
 	sourceUrl      *url.URL
 	sourceBranch   string
@@ -627,6 +638,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 func main() {
 	var srcRawUrl string
 	var resultsRawUrl string
+	var printVers bool
 	var err error
 
 	params := new(cliParams)
@@ -646,7 +658,13 @@ func main() {
 		"Push source-branch and any tag to results-repo, in addition to notes")
 	flag.Uint64Var(&params.pollIntervalS, "poll-interval", 60,
 		"While idle, poll source-repo for changes at this `seconds` interval")
+	flag.BoolVar(&printVers, "v", false, "print version and then exit")
 	flag.Parse()
+
+	if printVers {
+		vers()
+		return
+	}
 
 	if srcRawUrl == "" || resultsRawUrl == "" || params.testScript == "" {
 		usage()
