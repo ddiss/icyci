@@ -36,12 +36,13 @@ func vers() {
 }
 
 type cliParams struct {
-	sourceUrl      *url.URL
-	sourceBranch   string
-	testScript     string
-	resultsUrl     *url.URL
-	pushSrcToRslts bool
-	pollIntervalS  uint64
+	sourceUrl       *url.URL
+	sourceBranch    string
+	testScript      string
+	resultsUrl      *url.URL
+	pushSrcToRslts  bool
+	pollIntervalS   uint64
+	disableTimeouts bool
 }
 
 type State int
@@ -61,6 +62,7 @@ type loopState struct {
 	state           State
 	transitionTimer *time.Timer
 	verifiedTag     string
+	disableTimeouts bool
 }
 
 type stateDesc struct {
@@ -490,19 +492,21 @@ func transitionState(newState State, ls *loopState) {
 		oldState, states[oldState].desc,
 		newState, states[newState].desc)
 
-	if oldState == uninit {
-		ls.transitionTimer = time.NewTimer(states[newState].timeout)
-		return
-	}
+	if !ls.disableTimeouts {
+		if oldState == uninit {
+			ls.transitionTimer = time.NewTimer(states[newState].timeout)
+			return
+		}
 
-	// don't stop timer if leaving poll state, because...
-	if oldState != poll && !ls.transitionTimer.Stop() {
-		<-ls.transitionTimer.C
-	}
+		// don't stop timer if leaving poll state, because...
+		if oldState != poll && !ls.transitionTimer.Stop() {
+			<-ls.transitionTimer.C
+		}
 
-	// ...there's no timeout for poll state
-	if newState != poll {
-		ls.transitionTimer.Reset(states[newState].timeout)
+		// ...there's no timeout for poll state
+		if newState != poll {
+			ls.transitionTimer.Reset(states[newState].timeout)
+		}
 	}
 }
 
@@ -516,7 +520,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 	runScriptChan := make(chan runScriptCompletion)
 	pollExitChan := make(chan bool)
 
-	var ls loopState
+	var ls loopState = loopState{disableTimeouts: params.disableTimeouts}
 	transitionState(clone, &ls)
 	go func() {
 		cloneRepo(cmplChan, workDir, params.sourceUrl,
@@ -660,6 +664,8 @@ func main() {
 	flag.Uint64Var(&params.pollIntervalS, "poll-interval", 60,
 		"While idle, poll source-repo for changes at this `seconds` interval")
 	flag.BoolVar(&printVers, "v", false, "print version and then exit")
+	flag.BoolVar(&params.disableTimeouts, "disable-timeouts", false,
+		"Disable timeouts for states transitions")
 	flag.Parse()
 
 	if printVers {
