@@ -220,7 +220,6 @@ func pushLock(ch chan<- error, sourceDir string, branch string) {
 		}
 	}
 err_out:
-	log.Printf("leaving push lock with err: %v", err)
 	ch <- err
 }
 
@@ -528,7 +527,8 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 		// generic competion handler
 		case err := <-cmplChan:
 			if err != nil {
-				log.Printf("%s failed\n", states[ls.state].desc)
+				log.Printf("%s failed with %s\n",
+					states[ls.state].desc, err)
 				if ls.state == lock {
 					// lock errors transition to poll state
 					transitionState(poll, &ls)
