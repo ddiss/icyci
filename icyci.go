@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
-// Copyright (C) 2019 SUSE LLC
+// Copyright (C) 2019-2020 SUSE LLC
 
 package main
 
@@ -366,9 +366,10 @@ func pushResults(ch chan<- error, sourceDir string,
 			log.Printf("successfully pushed git notes lock")
 			break
 		}
+		log.Printf("git %v failed: %v", gitArgs, err)
 
 		if retries > 1 {
-			log.Printf("retrying output git notes after sleep")
+			log.Printf("retrying push after sleep")
 			time.Sleep(1 * time.Second)
 		}
 	}
