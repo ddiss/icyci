@@ -72,10 +72,10 @@ var states = map[State]stateDesc{
 	uninit:  {"uninitialized", 0},
 	clone:   {"clone source repository", time.Duration(1 * time.Hour)},
 	verify:  {"verify branch HEAD", time.Duration(1 * time.Minute)},
-	lock:    {"lock commit for testing", time.Duration(5 * time.Minute)},
+	lock:    {"lock commit for testing", time.Duration(10 * time.Minute)},
 	run:     {"run test", time.Duration(2 * time.Hour)},
-	push:    {"push test output notes", time.Duration(10 * time.Minute)},
-	cleanup: {"cleanup test artifacts", time.Duration(5 * time.Minute)},
+	push:    {"push test output notes", time.Duration(1 * time.Hour)},
+	cleanup: {"cleanup test artifacts", time.Duration(10 * time.Minute)},
 	poll:    {"poll source for new commits", 0},
 }
 
