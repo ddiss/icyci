@@ -71,7 +71,7 @@ func gpgInit(t *testing.T, tdir string) {
 	t.Logf("created GPG keypair at %s with key id %s", gpgDir, userEmail)
 }
 
-func gitReposInit(t *testing.T, gitHomeDir string, sdir string, rdir string) {
+func gitReposInit(t *testing.T, gitHomeDir string, repoDirs ...string) {
 
 	gitCfg := path.Join(gitHomeDir, ".gitconfig")
 	err := ioutil.WriteFile(gitCfg,
@@ -85,7 +85,7 @@ func gitReposInit(t *testing.T, gitHomeDir string, sdir string, rdir string) {
 	}
 
 	dupFilter := make(map[string]bool)
-	for _, dir := range []string{sdir, rdir} {
+	for _, dir := range repoDirs {
 		if dupFilter[dir] {
 			continue
 		}
