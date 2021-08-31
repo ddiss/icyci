@@ -321,7 +321,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, sdir)
 
 	cmd := exec.Command("git", "checkout", "-b", "mybranch")
 	cmd.Dir = sdir
@@ -425,7 +425,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, sdir)
 
 	cmd := exec.Command("git", "checkout", "-b", "mybranch")
 	cmd.Dir = sdir
@@ -573,7 +573,7 @@ func TestStopStart(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, sdir)
 
 	cmd := exec.Command("git", "checkout", "-b", "mybranch")
 	cmd.Dir = sdir
@@ -706,7 +706,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, sdir)
 
 	// commit from clone so that we can push the tag before the new head
 	cloneDir := path.Join(tdir, "test_clone_both")
@@ -841,7 +841,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, sdir)
 
 	cmd := exec.Command("git", "checkout", "-b", "mybranch")
 	cmd.Dir = sdir
@@ -1077,7 +1077,7 @@ func TestMultiInstance(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, sdir)
 
 	cmd := exec.Command("git", "checkout", "-b", "mybranch")
 	cmd.Dir = sdir
