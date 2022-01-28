@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
-// Copyright (C) 2019-2020 SUSE LLC
+// Copyright (C) 2019-2022 SUSE LLC
 
 package main
 
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/url"
@@ -266,9 +267,10 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 	defer stderrF.Close()
 
 	cmd = exec.Command(testScript)
+
 	cmd.Dir = sourceDir
-	cmd.Stdout = stdoutF
-	cmd.Stderr = stderrF
+	cmd.Stdout = io.MultiWriter(os.Stdout, stdoutF)
+	cmd.Stderr = io.MultiWriter(os.Stderr, stderrF)
 	err = cmd.Start()
 	if err != nil {
 		log.Printf("test %s failed to start: %v", testScript, err)
