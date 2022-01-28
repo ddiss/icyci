@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -268,6 +269,7 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 
 	cmd = exec.Command(testScript)
 
+	cmd.Env = append(os.Environ(), "ICYCI_PID="+strconv.Itoa(os.Getpid()))
 	cmd.Dir = sourceDir
 	cmd.Stdout = io.MultiWriter(os.Stdout, stdoutF)
 	cmd.Stderr = io.MultiWriter(os.Stderr, stderrF)
