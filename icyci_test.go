@@ -78,7 +78,9 @@ func gitReposInit(t *testing.T, gitHomeDir string, repoDirs ...string) {
 		[]byte(`[user]
 			name = `+userName+`
 		        email = `+userEmail+`
-			signingKey = <`+userEmail+`>`),
+			signingKey = <`+userEmail+`>
+			[init]
+			defaultBranch = main`),
 		os.FileMode(0644))
 	if err != nil {
 		t.Fatal(err)
