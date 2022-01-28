@@ -1224,3 +1224,87 @@ func TestMultiInstance(t *testing.T) {
 		}
 	}
 }
+
+// - check that ICYCI_X env variables are set within script
+func TestScriptEnv(t *testing.T) {
+	// commitI tracks the number of commits for which we should expect a
+	// corresponding results note entry.
+	var curCommit string
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
+		`echo "ICYCI_PID: $ICYCI_PID"`)
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+	}()
+
+	notesWaitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case notes := <-notesChan:
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "ICYCI_PID: "+strconv.Itoa(os.Getpid()) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+
+			// Finished, tell icyCI eventLoop to end
+			evExitChan <- 1
+			wg.Wait()
+			return
+
+		case <-notesWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}
