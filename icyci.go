@@ -54,7 +54,8 @@ const (
 	clone
 	verify
 	lock
-	run
+	startCmd
+	awaitCmd
 	push
 	cleanup
 	poll
@@ -73,14 +74,15 @@ type stateDesc struct {
 }
 
 var states = map[State]stateDesc{
-	uninit:  {"uninitialized", 0},
-	clone:   {"clone source repository", time.Duration(1 * time.Hour)},
-	verify:  {"verify branch HEAD", time.Duration(1 * time.Minute)},
-	lock:    {"lock commit for testing", time.Duration(10 * time.Minute)},
-	run:     {"run test", time.Duration(2 * time.Hour)},
-	push:    {"push test output notes", time.Duration(1 * time.Hour)},
-	cleanup: {"cleanup test artifacts", time.Duration(10 * time.Minute)},
-	poll:    {"poll source for new commits", 0},
+	uninit:   {"uninitialized", 0},
+	clone:    {"clone source repository", time.Duration(1 * time.Hour)},
+	verify:   {"verify branch HEAD", time.Duration(1 * time.Minute)},
+	lock:     {"lock commit for testing", time.Duration(10 * time.Minute)},
+	startCmd: {"start test command", time.Duration(1 * time.Minute)},
+	awaitCmd: {"await test completion", time.Duration(2 * time.Hour)},
+	push:     {"push test output notes", time.Duration(1 * time.Hour)},
+	cleanup:  {"cleanup test artifacts", time.Duration(10 * time.Minute)},
+	poll:     {"poll source for new commits", 0},
 }
 
 const (
@@ -227,20 +229,20 @@ err_out:
 	ch <- err
 }
 
-type runScriptCompletion struct {
-	stdoutF      string
-	stderrF      string
-	summaryF     string
+type runCmdState struct {
+	cmd          *exec.Cmd
+	stdoutP      string
+	stdoutF      *os.File
+	stderrP      string
+	stderrF      *os.File
+	summaryP     string
 	scriptStatus error
 	err          error
 }
 
-func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
+func startCommand(ch chan<- runCmdState, workDir string, sourceDir string,
 	branch string, testScript string) {
-	var stdoutF *os.File
-	var stderrF *os.File
-	var msg string
-	cmpl := runScriptCompletion{}
+	cmpl := runCmdState{}
 
 	cmd := exec.Command("git", "checkout", "--quiet", "origin/"+branch)
 	cmd.Dir = sourceDir
@@ -251,59 +253,87 @@ func runScript(ch chan<- runScriptCompletion, workDir string, sourceDir string,
 		goto err_out
 	}
 
-	cmpl.stdoutF = path.Join(workDir, "script.stdout")
-	stdoutF, err = os.Create(cmpl.stdoutF)
+	cmpl.stdoutP = path.Join(workDir, "script.stdout")
+	cmpl.stdoutF, err = os.Create(cmpl.stdoutP)
 	if err != nil {
 		log.Printf("stdout log creation failed: %v", err)
 		goto err_out
 	}
-	defer stdoutF.Close()
 
-	cmpl.stderrF = path.Join(workDir, "script.stderr")
-	stderrF, err = os.Create(cmpl.stderrF)
+	cmpl.stderrP = path.Join(workDir, "script.stderr")
+	cmpl.stderrF, err = os.Create(cmpl.stderrP)
 	if err != nil {
 		log.Printf("stderr log creation failed: %v", err)
-		goto err_out
+		goto err_stdout_close
 	}
-	defer stderrF.Close()
+
+	cmpl.summaryP = path.Join(workDir, "script.summary")
 
 	cmd = exec.Command(testScript)
 
 	cmd.Env = append(os.Environ(), "ICYCI_PID="+strconv.Itoa(os.Getpid()))
 	cmd.Dir = sourceDir
-	cmd.Stdout = io.MultiWriter(os.Stdout, stdoutF)
-	cmd.Stderr = io.MultiWriter(os.Stderr, stderrF)
+	cmd.Stdout = io.MultiWriter(os.Stdout, cmpl.stdoutF)
+	cmd.Stderr = io.MultiWriter(os.Stderr, cmpl.stderrF)
 	err = cmd.Start()
 	if err != nil {
 		log.Printf("test %s failed to start: %v", testScript, err)
-		goto err_out
+		goto err_stderr_close
 	}
+	cmpl.cmd = cmd
 
-	cmpl.scriptStatus = cmd.Wait()
-	stdoutF.Sync()
-	stderrF.Sync()
+	ch <- cmpl
+	return
 
-	cmpl.summaryF = path.Join(workDir, "script.summary")
-	if cmpl.scriptStatus == nil {
-		msg = fmt.Sprintf("%s completed successfully", testScript)
+err_stderr_close:
+	cmpl.stderrF.Close()
+err_stdout_close:
+	cmpl.stdoutF.Close()
+err_out:
+	ch <- runCmdState{
+		cmd:          nil,
+		stdoutP:      "",
+		stdoutF:      nil,
+		stderrP:      "",
+		stderrF:      nil,
+		summaryP:     "",
+		scriptStatus: err,
+		err:          err}
+}
+
+func awaitCommand(ch chan<- runCmdState, cmdState *runCmdState) {
+	var msg string
+
+	cmdState.scriptStatus = cmdState.cmd.Wait()
+	cmdState.stdoutF.Sync()
+	cmdState.stdoutF.Close()
+	cmdState.stderrF.Sync()
+	cmdState.stderrF.Close()
+
+	if cmdState.scriptStatus == nil {
+		msg = fmt.Sprintf("%s completed successfully",
+			cmdState.cmd.Path)
 	} else {
 		msg = fmt.Sprintf("%s failed: %v\nSee %s and %s for details",
-			testScript, cmpl.scriptStatus,
+			cmdState.cmd.Path, cmdState.scriptStatus,
 			stdoutNotesRef, stderrNotesRef)
 	}
 	log.Print(msg + "\n")
-	err = ioutil.WriteFile(cmpl.summaryF, []byte(msg), os.FileMode(0644))
+	err := ioutil.WriteFile(cmdState.summaryP, []byte(msg), os.FileMode(0644))
 	if err != nil {
 		goto err_out
 	}
 
-	ch <- cmpl
+	ch <- *cmdState
 	return
 err_out:
-	ch <- runScriptCompletion{
-		stdoutF:      "",
-		stderrF:      "",
-		summaryF:     "",
+	ch <- runCmdState{
+		cmd:          nil,
+		stdoutP:      "",
+		stdoutF:      nil,
+		stderrP:      "",
+		stderrF:      nil,
+		summaryP:     "",
 		scriptStatus: err,
 		err:          err}
 }
@@ -311,7 +341,7 @@ err_out:
 // push captured stdout and stderr notes to the results repository.
 func pushResults(ch chan<- error, sourceDir string,
 	branch string, tag string, pushSrcToRslts bool,
-	cmpl runScriptCompletion) {
+	cmpl runCmdState) {
 
 	var err error = nil
 	type notesOut struct {
@@ -321,9 +351,9 @@ func pushResults(ch chan<- error, sourceDir string,
 	var res notesOut
 
 	if cmpl.scriptStatus == nil {
-		res = notesOut{ns: passedNotesRef, msg: cmpl.summaryF}
+		res = notesOut{ns: passedNotesRef, msg: cmpl.summaryP}
 	} else {
-		res = notesOut{ns: failedNotesRef, msg: cmpl.summaryF}
+		res = notesOut{ns: failedNotesRef, msg: cmpl.summaryP}
 	}
 
 	for retries := 10; retries > 0; retries-- {
@@ -340,8 +370,8 @@ func pushResults(ch chan<- error, sourceDir string,
 		}
 
 		for _, note := range []notesOut{res,
-			{ns: stdoutNotesRef, msg: cmpl.stdoutF},
-			{ns: stderrNotesRef, msg: cmpl.stderrF}} {
+			{ns: stdoutNotesRef, msg: cmpl.stdoutP},
+			{ns: stderrNotesRef, msg: cmpl.stderrP}} {
 
 			gitArgs := []string{"notes", "--ref", note.ns, "add",
 				"--allow-empty", "-F", note.msg,
@@ -521,7 +551,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 
 	cmplChan := make(chan error)
 	verifyChan := make(chan verifyCompletion)
-	runScriptChan := make(chan runScriptCompletion)
+	runCmdChan := make(chan runCmdState)
 	pollExitChan := make(chan bool)
 
 	var ls loopState = loopState{disableTimeouts: params.disableTimeouts}
@@ -566,14 +596,14 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			// verify handled via separate chan, transitions to lock
 			// state
 			case lock:
-				transitionState(run, &ls)
+				transitionState(startCmd, &ls)
 				go func() {
-					runScript(runScriptChan, workDir,
+					startCommand(runCmdChan, workDir,
 						sourceDir, params.sourceBranch,
 						params.testScript)
 				}()
-			// run script completion handled via separate chan,
-			// transitions to push state
+			// start/wait script completion handled via separate
+			// chan, transitions to push state
 			case push:
 				transitionState(cleanup, &ls)
 				go func() {
@@ -618,17 +648,25 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 					params.sourceBranch)
 			}()
 
-		case runScriptCmpl := <-runScriptChan:
-			if runScriptCmpl.err != nil {
-				log.Fatal(runScriptCmpl.err)
+		case runCmdState := <-runCmdChan:
+			if runCmdState.err != nil {
+				log.Fatal(runCmdState.err)
 			}
 
-			transitionState(push, &ls)
-			go func() {
-				pushResults(cmplChan, sourceDir,
-					params.sourceBranch, ls.verifiedTag,
-					params.pushSrcToRslts, runScriptCmpl)
-			}()
+			switch ls.state {
+			case startCmd:
+				transitionState(awaitCmd, &ls)
+				go func() {
+					awaitCommand(runCmdChan, &runCmdState)
+				}()
+			case awaitCmd:
+				transitionState(push, &ls)
+				go func() {
+					pushResults(cmplChan, sourceDir,
+						params.sourceBranch, ls.verifiedTag,
+						params.pushSrcToRslts, runCmdState)
+				}()
+			}
 		case <-ls.transitionTimer.C:
 			log.Fatalf("State %v transition timeout!", ls.state)
 		case <-exitChan:
