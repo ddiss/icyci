@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
-// Copyright (C) 2019 SUSE LLC
+// Copyright (C) 2019-2022 SUSE LLC
 
 package main
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"path"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -1305,6 +1307,80 @@ func TestScriptEnv(t *testing.T) {
 
 		case <-notesWaitTimer.C:
 			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}
+
+// - check that SIGUSR1 is processed
+func TestScriptSignalLog(t *testing.T) {
+	grepChan := make(chan bool)
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = fileWriteSignedCommit(t, sdir, "src_test.sh",
+		`kill -SIGUSR1 "$ICYCI_PID"; sleep 1`)
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	msg := fmt.Sprintf("Got signal %d while in state %d\n",
+		syscall.SIGUSR1, awaitCmd)
+	lp := logParser{
+		T:      t,
+		needle: []byte(msg),
+		ch:     grepChan,
+	}
+	log.SetOutput(&lp)
+	t.Logf("parsing icyCI log for: %s", msg)
+
+	// timeout before script should end
+	logWaitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case <-grepChan:
+			// restore log
+			log.SetOutput(os.Stderr)
+			t.Logf("log grep successful")
+			// Finished, tell icyCI eventLoop to end
+			evExitChan <- 1
+			wg.Wait()
+			return
+
+		case <-logWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI signal log\n")
 		}
 	}
 }
