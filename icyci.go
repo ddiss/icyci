@@ -391,7 +391,9 @@ func pushResults(ch chan<- error, sourceDir string,
 		gitArgs := []string{"push", resultsRemote, res.ns,
 			stdoutNotesRef, stderrNotesRef}
 		if pushSrcToRslts {
-			gitArgs = append(gitArgs, "HEAD:refs/heads/"+branch)
+			// force push because 'branch' we fetched previously
+			// may be rebased, i.e. non-fast-forward
+			gitArgs = append(gitArgs, "+HEAD:refs/heads/"+branch)
 			if tag != "" {
 				gitArgs = append(gitArgs, "refs/tags/"+tag)
 			}
