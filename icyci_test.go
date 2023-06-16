@@ -104,7 +104,7 @@ func gitReposInit(t *testing.T, gitHomeDir string, repoDirs ...string) {
 }
 
 func fileWriteCommit(t *testing.T, sdir string, sfiles map[string]string,
-	sign bool) string {
+	gitCommitParams ...string) string {
 	for sfile, script := range sfiles {
 		srcPath := path.Join(sdir, sfile)
 		err := ioutil.WriteFile(srcPath,
@@ -123,13 +123,7 @@ func fileWriteCommit(t *testing.T, sdir string, sfiles map[string]string,
 		}
 	}
 
-	gitCmd := []string{"commit"}
-	if sign {
-		gitCmd = append(gitCmd, "-S", "-m", "signed source commit")
-	} else {
-		gitCmd = append(gitCmd, "-m", "unsigned source commit")
-	}
-
+	gitCmd := append([]string{"commit"}, gitCommitParams...)
 	cmd := exec.Command("git", gitCmd...)
 	cmd.Dir = sdir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -148,24 +142,25 @@ func fileWriteCommit(t *testing.T, sdir string, sfiles map[string]string,
 		t.Fatal(err)
 	}
 
-	curRev := string(bytes.TrimRight(revParseOut.Bytes(), "\n"))
-	if sign {
-		t.Logf("%s: signed commit: %v\n", curRev, sfiles)
-	} else {
-		t.Logf("%s: unsigned commit: %v\n", curRev, sfiles)
-	}
-
-	return curRev
+	return string(bytes.TrimRight(revParseOut.Bytes(), "\n"))
 }
 
 func fileWriteSignedCommit(t *testing.T, sdir string, sfile string,
 	script string) string {
-	return fileWriteCommit(t, sdir, map[string]string{sfile: script}, true)
+	sfiles := map[string]string{sfile: script}
+	curRev := fileWriteCommit(t, sdir, sfiles,
+		"-S", "-m", "signed source commit")
+	t.Logf("%s: signed commit: %v\n", curRev, sfiles)
+	return curRev
 }
 
 func fileWriteUnsignedCommit(t *testing.T, sdir string, sfile string,
 	script string) string {
-	return fileWriteCommit(t, sdir, map[string]string{sfile: script}, false)
+	sfiles := map[string]string{sfile: script}
+	curRev := fileWriteCommit(t, sdir, map[string]string{sfile: script},
+		"-m", "unsigned source commit")
+	t.Logf("%s: unsigned commit: %v\n", curRev, sfiles)
+	return curRev
 }
 
 func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
@@ -1031,7 +1026,7 @@ func handleSpinlk(t *testing.T, sdir string, cloneDir string,
 			strconv.Itoa(cs.nextCommitI) + `"
 			touch ` + iLost.spinlk + `
 			while [ -f ` + iLost.spinlk + ` ]; do sleep 1; done`}
-	cs.m[cs.nextCommitI] = fileWriteCommit(t, sdir, fm, true)
+	cs.m[cs.nextCommitI] = fileWriteCommit(t, sdir, fm, "-S", "-m", "commit")
 	cs.nextCommitI++
 }
 
@@ -1133,7 +1128,7 @@ func TestMultiInstance(t *testing.T) {
 		"i2_test.sh": `echo "i2: commitI: ` + strconv.Itoa(cs.nextCommitI) + `"
 			touch ` + i2.spinlk + `
 			while [ -f ` + i2.spinlk + ` ]; do sleep 1; done`}
-	cs.m[cs.nextCommitI] = fileWriteCommit(t, sdir, fm, true)
+	cs.m[cs.nextCommitI] = fileWriteCommit(t, sdir, fm, "-S", "-m", "commit")
 	cs.nextCommitI++
 
 	i1.wg.Add(1)
