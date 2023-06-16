@@ -1379,3 +1379,147 @@ func TestScriptSignalLog(t *testing.T) {
 		}
 	}
 }
+
+// - source and results are separate git repos, with pushSrcToRslts
+// - source branch is force pushed
+// - expect results to also be forced
+// - single icyCI instance trusting only one key
+func TestForcePushSrc(t *testing.T) {
+	var commits = []string{}
+	const maxCommitI int = 4
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src")
+	rdir := path.Join(tdir, "test_rslt")
+	gitReposInit(t, tdir, sdir, rdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	curCommit := fileWriteSignedCommit(t, sdir, "src_test.sh",
+		`echo "commitI: `+strconv.Itoa(len(commits))+`"`)
+	commits = append(commits, curCommit)
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: true,
+		pollIntervalS:  1,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd = exec.Command("git", "clone", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = exec.Command("git", "remote", "add", "results", rdir)
+	cmd.Dir = cloneDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = exec.Command("git", "config", "--add", "remote.results.fetch",
+		"refs/notes/*:refs/notes/*")
+	cmd.Dir = cloneDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+	}()
+
+	notesWaitTimer := time.NewTimer(time.Second * 10)
+event_loop:
+	for {
+		select {
+		case notes := <-notesChan:
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != `commitI: `+strconv.Itoa(len(commits)-1) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			if len(commits) >= maxCommitI {
+				evExitChan <- 1
+				wg.Wait()
+				break event_loop
+			}
+
+			script := `echo "commitI: ` + strconv.Itoa(len(commits)) + `"`
+			curCommit = fileWriteCommit(t, sdir,
+				map[string]string{"src_test.sh": script},
+				"-S", "--amend", "-m", "signed source commit")
+			commits = append(commits, curCommit)
+
+			go func() {
+				waitNotes(t, cloneDir, stdoutNotesRef,
+					curCommit, notesChan)
+			}()
+
+			if !notesWaitTimer.Stop() {
+				<-notesWaitTimer.C
+			}
+			notesWaitTimer.Reset(time.Second * 10)
+		case <-notesWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+
+	// git gc --prune=now in results repo to see which objects get dropped,
+	// if any.
+	cmd = exec.Command("git", "gc", "--prune=now")
+	cmd.Dir = rdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range commits {
+		cmd = exec.Command("git", "notes", "--ref="+stdoutNotesRef, "show",
+			"--", i)
+		cmd.Dir = rdir
+		err = cmd.Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		cmd = exec.Command("git", "show", i)
+		cmd.Dir = rdir
+		err = cmd.Run()
+		// all commit objects are retained, despite force; due to notes?
+	}
+}
