@@ -708,7 +708,7 @@ func main() {
 	flag.StringVar(&params.sourceBranch, "source-branch", "main",
 		"Git `branch` for the repository under test")
 	flag.StringVar(&params.testScript, "test-script", "",
-		"Test `script path`, relative to source-repo or absolute (required)")
+		"Test script `path`, relative to source-repo or absolute (required)")
 	flag.StringVar(&resultsRawUrl, "results-repo", "",
 		"Git `URL` to push test results to (required)")
 	// If the corresponding source branch is not pushed, then cloning the
