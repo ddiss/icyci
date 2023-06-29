@@ -549,14 +549,14 @@ func transitionState(newState State, ls *loopState) {
 }
 
 // event loop to track state of clone, verify, test, push progress
-func eventLoop(params *cliParams, workDir string, exitChan chan int) {
+func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 
 	sourceDir := path.Join(workDir, "source")
 
 	cmplChan := make(chan error)
 	verifyChan := make(chan verifyCompletion)
 	runCmdChan := make(chan runCmdState)
-	pollExitChan := make(chan bool)
+	childExitChan := make(chan bool)
 	signalChan := make(chan os.Signal, 1)
 
 	var ls loopState = loopState{disableTimeouts: params.disableTimeouts}
@@ -578,7 +578,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 					transitionState(poll, &ls)
 					go func() {
 						pollSource(cmplChan,
-							pollExitChan,
+							childExitChan,
 							sourceDir,
 							params.sourceBranch,
 							params.pollIntervalS)
@@ -620,7 +620,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			case cleanup:
 				transitionState(poll, &ls)
 				go func() {
-					pollSource(cmplChan, pollExitChan,
+					pollSource(cmplChan, childExitChan,
 						sourceDir,
 						params.sourceBranch,
 						params.pollIntervalS)
@@ -640,7 +640,7 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 			if verifyCmpl.err != nil {
 				transitionState(poll, &ls)
 				go func() {
-					pollSource(cmplChan, pollExitChan,
+					pollSource(cmplChan, childExitChan,
 						sourceDir,
 						params.sourceBranch,
 						params.pollIntervalS)
@@ -682,11 +682,11 @@ func eventLoop(params *cliParams, workDir string, exitChan chan int) {
 		case s := <-signalChan:
 			log.Printf("Got signal %d while in state %d\n",
 				s, ls.state)
-		case <-exitChan:
+		case <-evExitChan:
 			log.Printf("Got exit message while in state %d\n",
 				ls.state)
 			if ls.state == poll {
-				pollExitChan <- true
+				childExitChan <- true
 				log.Print("waiting for poll routine to exit\n")
 				<-cmplChan
 			}
