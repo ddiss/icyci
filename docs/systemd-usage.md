@@ -26,3 +26,14 @@ The procedure is as follows:
    # systemctl enable icyci@linux-kernel-stable
    # systemctl start icyci@linux-kernel-stable
    ```
+
+## Running as a user service
+
+  ```
+  # mkdir -p $HOME/.config/systemd/user $HOME/.config/icyci
+  # ln -sr systemd-user/icyci@.service $HOME/.config/systemd/user/icyci@linux-kernel-stable.service
+  # cp systemd-user/icyci-instance.conf $HOME/.config/icyci/linux-kernel-stable.conf
+  # systemctl --user enable icyci@linux-kernel-stable.service
+  # loginctl enable-linger $USER
+  ```
+  * the last command applies only to remote machines without permanent login
