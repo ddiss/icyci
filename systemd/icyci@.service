@@ -1,6 +1,6 @@
 [Unit]
 Description=icyCI
-After=network-online.target mnt-resource.mount
+After=network-online.target
 
 [Service]
 EnvironmentFile=-/etc/sysconfig/icyci
