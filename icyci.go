@@ -449,6 +449,7 @@ err_out:
 	return curRev, err
 }
 
+// initial clone provided --single-branch, so fetch will ignore other heads.
 func pollFetch(sourceDir string, branch string) error {
 	cmd := exec.Command("git", "fetch", "origin")
 	cmd.Dir = sourceDir
