@@ -237,6 +237,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  60,
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -346,6 +347,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -450,6 +452,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -598,6 +601,7 @@ func TestStopStart(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -759,6 +763,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -866,6 +871,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -1117,6 +1123,7 @@ func TestMultiInstance(t *testing.T) {
 			resultsUrl:     rurl,
 			pushSrcToRslts: false,
 			pollIntervalS:  1,
+			notesNS:        defNotesNS,
 		}
 
 		i.evExitChan = make(chan int)
@@ -1262,6 +1269,7 @@ func TestScriptEnv(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -1344,6 +1352,7 @@ func TestScriptSignalLog(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -1424,6 +1433,7 @@ func TestForcePushSrc(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: true,
 		pollIntervalS:  1,
+		notesNS:        defNotesNS,
 	}
 
 	var wg sync.WaitGroup

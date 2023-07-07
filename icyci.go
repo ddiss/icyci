@@ -47,6 +47,7 @@ type cliParams struct {
 	pushSrcToRslts  bool
 	pollIntervalS   uint64
 	disableTimeouts bool
+	notesNS         string
 }
 
 type State int
@@ -185,9 +186,9 @@ err_out:
 }
 
 // lock to flags us as owner for testing this commit
-func pushLock(ch chan<- error, sourceDir string, branch string) {
+func pushLock(ch chan<- error, sourceDir string, branch string, notesNS string) {
 	var err error = nil
-	lockNotesRef := "refs/notes/"+defNotesNS+lockNotes
+	lockNotesRef := "refs/notes/"+notesNS+lockNotes
 
 	for retries := 10; retries > 0; retries-- {
 
@@ -306,7 +307,7 @@ err_out:
 		err:          err}
 }
 
-func awaitCommand(ch chan<- runCmdState, cmdState *runCmdState) {
+func awaitCommand(ch chan<- runCmdState, notesNS string, cmdState *runCmdState) {
 	var msg string
 
 	cmdState.scriptStatus = cmdState.cmd.Wait()
@@ -319,8 +320,8 @@ func awaitCommand(ch chan<- runCmdState, cmdState *runCmdState) {
 		msg = fmt.Sprintf("%s completed successfully",
 			cmdState.cmd.Path)
 	} else {
-		stdoutNotesRef := "refs/notes/"+defNotesNS+stdoutNotes
-		stderrNotesRef := "refs/notes/"+defNotesNS+stderrNotes
+		stdoutNotesRef := "refs/notes/"+notesNS+stdoutNotes
+		stderrNotesRef := "refs/notes/"+notesNS+stderrNotes
 		msg = fmt.Sprintf("%s failed: %v\nSee %s and %s for details",
 			cmdState.cmd.Path, cmdState.scriptStatus,
 			stdoutNotesRef, stderrNotesRef)
@@ -347,7 +348,7 @@ err_out:
 
 // push captured stdout and stderr notes to the results repository.
 func pushResults(ch chan<- error, sourceDir string,
-	branch string, tag string, pushSrcToRslts bool,
+	branch string, tag string, pushSrcToRslts bool, notesNS string,
 	cmpl runCmdState) {
 
 	var err error = nil
@@ -356,8 +357,8 @@ func pushResults(ch chan<- error, sourceDir string,
 		msg string
 	}
 	var res notesOut
-	stdoutNotesRef := "refs/notes/"+defNotesNS+stdoutNotes
-	stderrNotesRef := "refs/notes/"+defNotesNS+stderrNotes
+	stdoutNotesRef := "refs/notes/"+notesNS+stdoutNotes
+	stderrNotesRef := "refs/notes/"+notesNS+stderrNotes
 	var notesName string
 
 	if cmpl.scriptStatus == nil {
@@ -365,7 +366,7 @@ func pushResults(ch chan<- error, sourceDir string,
 	} else {
 		notesName = failedNotes
 	}
-	res = notesOut{ns: "refs/notes/"+defNotesNS+notesName, msg: cmpl.summaryP}
+	res = notesOut{ns: "refs/notes/"+notesNS+notesName, msg: cmpl.summaryP}
 
 	for retries := 10; retries > 0; retries-- {
 		// fetch ensures we don't conflict, may fail if never pushed
@@ -663,7 +664,7 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 			transitionState(lock, &ls)
 			go func() {
 				pushLock(cmplChan, sourceDir,
-					params.sourceBranch)
+					params.sourceBranch, params.notesNS)
 			}()
 
 		case runCmdState := <-runCmdChan:
@@ -675,7 +676,8 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 			case startCmd:
 				transitionState(awaitCmd, &ls)
 				go func() {
-					awaitCommand(runCmdChan, &runCmdState)
+					awaitCommand(runCmdChan, params.notesNS,
+						&runCmdState)
 				}()
 			case awaitCmd:
 				// stop accepting signals as on-demand push reqs
@@ -684,7 +686,8 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 				go func() {
 					pushResults(cmplChan, sourceDir,
 						params.sourceBranch, ls.verifiedTag,
-						params.pushSrcToRslts, runCmdState)
+						params.pushSrcToRslts,
+						params.notesNS, runCmdState)
 				}()
 			}
 		case <-ls.transitionTimer.C:
@@ -731,6 +734,8 @@ func main() {
 	flag.BoolVar(&printVers, "v", false, "print version and then exit")
 	flag.BoolVar(&params.disableTimeouts, "disable-timeouts", false,
 		"Disable timeouts for states transitions")
+	flag.StringVar(&params.notesNS, "notes-ns", defNotesNS,
+		"Namespace (`prefix`) to use for all git notes, e.g. \"icyci-riscv\"")
 	flag.Parse()
 
 	if printVers {
