@@ -88,11 +88,13 @@ var states = map[State]stateDesc{
 }
 
 const (
-	lockNotesRef   = "refs/notes/icyci.locked"
-	stdoutNotesRef = "refs/notes/icyci.output.stdout"
-	stderrNotesRef = "refs/notes/icyci.output.stderr"
-	passedNotesRef = "refs/notes/icyci.result.passed"
-	failedNotesRef = "refs/notes/icyci.result.failed"
+	// notes refs are preceeded by a namespace, which defaults to:
+	defNotesNS  = "icyci"
+	lockNotes   = ".locked"
+	stdoutNotes = ".output.stdout"
+	stderrNotes = ".output.stderr"
+	passedNotes = ".result.passed"
+	failedNotes = ".result.failed"
 	resultsRemote  = "results"
 )
 
@@ -185,6 +187,7 @@ err_out:
 // lock to flags us as owner for testing this commit
 func pushLock(ch chan<- error, sourceDir string, branch string) {
 	var err error = nil
+	lockNotesRef := "refs/notes/"+defNotesNS+lockNotes
 
 	for retries := 10; retries > 0; retries-- {
 
@@ -316,6 +319,8 @@ func awaitCommand(ch chan<- runCmdState, cmdState *runCmdState) {
 		msg = fmt.Sprintf("%s completed successfully",
 			cmdState.cmd.Path)
 	} else {
+		stdoutNotesRef := "refs/notes/"+defNotesNS+stdoutNotes
+		stderrNotesRef := "refs/notes/"+defNotesNS+stderrNotes
 		msg = fmt.Sprintf("%s failed: %v\nSee %s and %s for details",
 			cmdState.cmd.Path, cmdState.scriptStatus,
 			stdoutNotesRef, stderrNotesRef)
@@ -351,12 +356,16 @@ func pushResults(ch chan<- error, sourceDir string,
 		msg string
 	}
 	var res notesOut
+	stdoutNotesRef := "refs/notes/"+defNotesNS+stdoutNotes
+	stderrNotesRef := "refs/notes/"+defNotesNS+stderrNotes
+	var notesName string
 
 	if cmpl.scriptStatus == nil {
-		res = notesOut{ns: passedNotesRef, msg: cmpl.summaryP}
+		notesName = passedNotes
 	} else {
-		res = notesOut{ns: failedNotesRef, msg: cmpl.summaryP}
+		notesName = failedNotes
 	}
+	res = notesOut{ns: "refs/notes/"+defNotesNS+notesName, msg: cmpl.summaryP}
 
 	for retries := 10; retries > 0; retries-- {
 		// fetch ensures we don't conflict, may fail if never pushed

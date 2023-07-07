@@ -23,6 +23,9 @@ import (
 const (
 	userName  = "icyCI test"
 	userEmail = "icyci@example.com"
+	// matches default ref path
+	stdoutNotesRef = "refs/notes/"+defNotesNS+stdoutNotes
+	passedNotesRef = "refs/notes/"+defNotesNS+passedNotes
 )
 
 func gpgInit(t *testing.T, tdir string) {
