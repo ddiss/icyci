@@ -90,6 +90,9 @@ git log --show-notes="*"
 icyCI can be run as a systemd service. For details, see
 [docs/systemd-usage.md](docs/systemd-usage.md).
 
+The ability to use multiple icyCI instances to target a single repository is
+documented further in [docs/multi-instance.md](docs/multi-instance.md).
+
 
 Architecture
 ------------
