@@ -24,8 +24,8 @@ const (
 	userName  = "icyCI test"
 	userEmail = "icyci@example.com"
 	// matches default ref path
-	stdoutNotesRef = "refs/notes/"+defNotesNS+stdoutNotes
-	passedNotesRef = "refs/notes/"+defNotesNS+passedNotes
+	stdoutNotesRef = "refs/notes/" + defNotesNS + stdoutNotes
+	passedNotesRef = "refs/notes/" + defNotesNS + passedNotes
 )
 
 func gpgInit(t *testing.T, tdir string) {
@@ -1039,10 +1039,11 @@ func handleSpinlk(t *testing.T, sdir string, cloneDir string,
 	cs.nextCommitI++
 }
 
-func checkResults(t *testing.T, repoDir string, commit string, script string) {
+func checkResults(t *testing.T, repoDir string, commit string, notesRef string,
+	expected string) {
 	var notesOut bytes.Buffer
 
-	cmd := exec.Command("git", "notes", "--ref="+passedNotesRef, "show",
+	cmd := exec.Command("git", "notes", "--ref="+notesRef, "show",
 		"--", commit)
 	cmd.Dir = repoDir
 	cmd.Stdout = &notesOut
@@ -1052,10 +1053,10 @@ func checkResults(t *testing.T, repoDir string, commit string, script string) {
 		t.Fatal(err)
 	}
 	snotes := string(bytes.TrimRight(notesOut.Bytes(), "\n"))
-	if snotes != script+" completed successfully" {
+	if snotes != expected {
 		t.Fatalf("%s does not match expected\n", snotes)
 	}
-	t.Logf("%s matches expected: %s", passedNotesRef, snotes)
+	t.Logf("%s matches expected: %s", notesRef, snotes)
 }
 
 // - test multiple concurrent icyCI instances running against the same source
@@ -1175,7 +1176,7 @@ func TestMultiInstance(t *testing.T) {
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
-	for {
+	for !i1.gotNotes || !i2.gotNotes {
 		select {
 		case <-i1.spinlkChan:
 			if !waitTimer.Stop() {
@@ -1218,17 +1219,13 @@ func TestMultiInstance(t *testing.T) {
 		case <-waitTimer.C:
 			t.Fatal("timeout while waiting for icyCI notes\n")
 		}
-
-		if i1.gotNotes && i2.gotNotes {
-			for _, i := range []*instanceState{&i1, &i2} {
-				checkResults(t, cloneDir, i.commit,
-					i.params.testScript)
-				// tell icyCI eventLoop to end
-				i.evExitChan <- 1
-				i.wg.Wait()
-			}
-			return
-		}
+	}
+	for _, i := range []*instanceState{&i1, &i2} {
+		checkResults(t, cloneDir, i.commit, passedNotesRef,
+			i.params.testScript+" completed successfully")
+		// tell icyCI eventLoop to end
+		i.evExitChan <- 1
+		i.wg.Wait()
 	}
 }
 
