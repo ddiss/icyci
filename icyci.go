@@ -19,6 +19,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -708,6 +709,36 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 	}
 }
 
+func parseStateTimeout(state_duration string) error {
+	state_dur := strings.Split(state_duration, ":")
+	if len(state_dur) != 2 {
+		return errors.New("invalid state_duration parameter")
+	}
+	state := uninit
+	dur, err := time.ParseDuration(state_dur[1])
+	if err != nil {
+		return err
+	}
+
+	switch state_dur[0] {
+	case "await-command":
+		state = awaitCmd
+	default:
+		log.Printf("-timeout state %s invalid. Supported: %s.\n",
+			state_dur[0], "await-command");
+		return errors.New("-timeout state invalid")
+	}
+
+	if s, ok := states[state]; ok {
+		log.Printf("Changing %s timeout from %v to %v\n", state_dur[0],
+			s.timeout, dur)
+		s.timeout = dur
+		states[state] = s
+	}
+
+	return nil
+}
+
 func main() {
 	var srcRawUrl string
 	var resultsRawUrl string
@@ -736,6 +767,8 @@ func main() {
 		"Disable timeouts for states transitions")
 	flag.StringVar(&params.notesNS, "notes-ns", defNotesNS,
 		"Namespace (`prefix`) to use for all git notes, e.g. \"icyci-riscv\"")
+	flag.Func("timeout", "Timeout for a given state in `state:duration` format",
+		parseStateTimeout)
 	flag.Parse()
 
 	if printVers {
