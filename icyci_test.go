@@ -1731,3 +1731,46 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 		i.wg.Wait()
 	}
 }
+
+// simple unit test for -timeout parameter parsing
+func TestStateTimeoutParam(t *testing.T) {
+	states_before_timeout_changes := states
+	defer func() { states = states_before_timeout_changes }()
+
+	err := parseStateTimeout("await-command:3s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states[awaitCmd].timeout != time.Duration(3 * time.Second) {
+		t.Fatal("unexpected timeout")
+	}
+
+	err = parseStateTimeout("await-command:3h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states[awaitCmd].timeout != time.Duration(3 * time.Hour) {
+		t.Fatal("unexpected timeout")
+	}
+
+	// param is case sensitive
+	err = parseStateTimeout("Await-command:3s")
+	if err == nil {
+		t.Fatal("expected failure for capital state name")
+	}
+
+	// bad duration
+	err = parseStateTimeout("await-command:3b")
+	if err == nil {
+		t.Fatal("expected failure for capital state name")
+	}
+	err = parseStateTimeout("await-command:")
+	if err == nil {
+		t.Fatal("expected failure for capital state name")
+	}
+
+	err = parseStateTimeout(":await-command:3s")
+	if err == nil {
+		t.Fatal("expected failure for capital state name")
+	}
+}
