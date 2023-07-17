@@ -1866,3 +1866,86 @@ func TestScriptTimeout(t *testing.T) {
 		}
 	}
 }
+
+// exit while test-script is running and confirm that it stops
+func TestScriptExit(t *testing.T) {
+	spinlkChan := make(chan bool)
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// continuous recreation of spinlk file is used to 
+	spinlk := path.Join(tdir, "spinlk")
+	fileWriteSignedCommit(t, sdir, "src_test.sh",
+		"while true; do touch "+spinlk+"; fsync "+spinlk+"; sleep 0.5; done")
+
+	go func() {
+		waitSpinlk(t, spinlk, spinlkChan)
+	}()
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1,
+		notesNS:        defNotesNS,
+	}
+
+	evExitChan := make(chan int)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		exitCmpl <- 1
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	done := false
+	for !done {
+		select {
+		case <-spinlkChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			evExitChan <- 1
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			t.Log("event loop exited")
+			// script should now have stopped. Removal of spinlk
+			// file shouldn't result in recreation.
+			err := os.Remove(spinlk)
+			time.Sleep(time.Second * 1)
+			_, err = os.Stat(spinlk)
+			if err == nil {
+				t.Fatalf("%s file reappeared; script still running",
+					spinlk)
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for spinlk or exit")
+		}
+	}
+
+}

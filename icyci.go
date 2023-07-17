@@ -737,6 +737,10 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 				childExitChan <- errors.New("exit requested")
 				log.Print("waiting for poll routine to exit\n")
 				<-cmplChan
+			} else if ls.state == awaitCmd {
+				childExitChan <- errors.New("exit requested")
+				log.Print("waiting for cmd to exit via SIGKILL\n")
+				<-runCmdChan
 			}
 			return
 		}
