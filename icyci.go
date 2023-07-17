@@ -308,10 +308,32 @@ err_out:
 		err:          err}
 }
 
-func awaitCommand(ch chan<- runCmdState, notesNS string, cmdState *runCmdState) {
+// @exitCh can be used to kill the cmd process on timeout / exit
+func awaitCommand(ch chan<- runCmdState, exitCh chan error, notesNS string,
+	cmdState *runCmdState) {
 	var msg string
+	var err error
 
-	cmdState.scriptStatus = cmdState.cmd.Wait()
+	cmdWaitChan := make(chan error)
+	go func() {
+		status := cmdState.cmd.Wait()
+		cmdWaitChan <- status
+	}()
+
+	for done := false; !done; {
+		select {
+		case cmdStatus := <-cmdWaitChan:
+			// don't overwrite exitCh error with Kill() status
+			if cmdState.scriptStatus == nil {
+				cmdState.scriptStatus = cmdStatus
+			}
+			done = true
+		case err = <-exitCh:
+			cmdState.cmd.Process.Kill()
+			log.Printf("got exit request: %v\n", err)
+			cmdState.scriptStatus = err
+		}
+	}
 	cmdState.stdoutF.Sync()
 	cmdState.stdoutF.Close()
 	cmdState.stderrF.Sync()
@@ -328,7 +350,7 @@ func awaitCommand(ch chan<- runCmdState, notesNS string, cmdState *runCmdState) 
 			stdoutNotesRef, stderrNotesRef)
 	}
 	log.Print(msg + "\n")
-	err := ioutil.WriteFile(cmdState.summaryP, []byte(msg), os.FileMode(0644))
+	err = ioutil.WriteFile(cmdState.summaryP, []byte(msg), os.FileMode(0644))
 	if err != nil {
 		goto err_out
 	}
@@ -680,8 +702,8 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 			case startCmd:
 				transitionState(awaitCmd, &ls)
 				go func() {
-					awaitCommand(runCmdChan, params.notesNS,
-						&runCmdState)
+					awaitCommand(runCmdChan, childExitChan,
+						params.notesNS, &runCmdState)
 				}()
 			case awaitCmd:
 				// stop accepting signals as on-demand push reqs
@@ -695,7 +717,16 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 				}()
 			}
 		case <-ls.transitionTimer.C:
-			log.Fatalf("State %v transition timeout!", ls.state)
+			if ls.state == awaitCmd {
+				ls.transitionTimer.Stop()
+				// job timeout isn't fatal. Invoke SIGKILL
+				err := fmt.Errorf("%v await-command timeout reached",
+					states[awaitCmd].timeout)
+				childExitChan <- err
+			} else {
+				log.Fatalf("State %v transition timeout!",
+					ls.state)
+			}
 		case s := <-signalChan:
 			log.Printf("Got signal %d while in state %d\n",
 				s, ls.state)
@@ -763,6 +794,7 @@ func main() {
 	// confusion due to the missing commits referenced by the notes.
 	flag.BoolVar(&params.pushSrcToRslts, "push-source-to-results", true,
 		"Push source-branch and any tag to results-repo, in addition to notes")
+	// TODO should support time.ParseDuration() suffixes, e.g. 1h?
 	flag.Uint64Var(&params.pollIntervalS, "poll-interval", 60,
 		"While idle, poll source-repo for changes at this `seconds` interval")
 	flag.BoolVar(&printVers, "v", false, "print version and then exit")

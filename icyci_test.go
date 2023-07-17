@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -26,6 +27,7 @@ const (
 	// matches default ref path
 	stdoutNotesRef = "refs/notes/" + defNotesNS + stdoutNotes
 	passedNotesRef = "refs/notes/" + defNotesNS + passedNotes
+	failedNotesRef = "refs/notes/" + defNotesNS + failedNotes
 )
 
 func gpgInit(t *testing.T, tdir string) {
@@ -1772,5 +1774,95 @@ func TestStateTimeoutParam(t *testing.T) {
 	err = parseStateTimeout(":await-command:3s")
 	if err == nil {
 		t.Fatal("expected failure for capital state name")
+	}
+}
+
+// check that script timeout results in regular failure path
+func TestScriptTimeout(t *testing.T) {
+	var curCommit string
+	// revert to previous timeouts after test
+	states_before_timeout_changes := states
+	defer func() { states = states_before_timeout_changes }()
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
+		"sleep 1 && echo DONE")
+
+	err = parseStateTimeout("await-command:500ms")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	evExitChan := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		wg.Done()
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, failedNotesRef, curCommit, notesChan)
+	}()
+
+	notesWaitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case notes := <-notesChan:
+			fnotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if !strings.HasPrefix(fnotes,
+				"./src_test.sh failed: 500ms await-command timeout") {
+				t.Fatalf("%s does not match expected\n", fnotes)
+			}
+			evExitChan <- 1
+			wg.Wait()
+			return
+
+		case <-notesWaitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
 	}
 }
