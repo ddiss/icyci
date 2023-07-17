@@ -762,8 +762,8 @@ func parseStateTimeout(state_duration string) error {
 	case "await-command":
 		state = awaitCmd
 	default:
-		log.Printf("-timeout state %s invalid. Supported: %s.\n",
-			state_dur[0], "await-command");
+		log.Printf("-timeout state %s invalid. Supported: %s (default %v).\n",
+			state_dur[0], "await-command", states[awaitCmd].timeout);
 		return errors.New("-timeout state invalid")
 	}
 
@@ -806,7 +806,8 @@ func main() {
 		"Disable timeouts for states transitions")
 	flag.StringVar(&params.notesNS, "notes-ns", defNotesNS,
 		"Namespace (`prefix`) to use for all git notes, e.g. \"icyci-riscv\"")
-	flag.Func("timeout", "Timeout for a given state in `state:duration` format",
+	flag.Func("timeout", "Individual `state:duration` timeout. E.g. "+
+		"\"await-command:1h\" fails a test script if runtime exceeds an hour",
 		parseStateTimeout)
 	flag.Parse()
 
