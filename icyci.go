@@ -550,7 +550,11 @@ func transitionState(newState State, ls *loopState) {
 
 		// don't stop timer if leaving poll state, because...
 		if oldState != poll && !ls.transitionTimer.Stop() {
-			<-ls.transitionTimer.C
+			// select + default to avoid deadlock when already drained
+			select {
+				case <-ls.transitionTimer.C:
+				default:
+			}
 		}
 
 		// ...there's no timeout for poll state
