@@ -474,7 +474,7 @@ err_out:
 	return err
 }
 
-func pollSource(retCh chan<- error, exitCh chan bool, sourceDir string, branch string,
+func pollSource(retCh chan<- error, exitCh chan error, sourceDir string, branch string,
 	pollIntervalS uint64) {
 
 	var err error = nil
@@ -493,9 +493,8 @@ func pollSource(retCh chan<- error, exitCh chan bool, sourceDir string, branch s
 	pollTimer = time.NewTimer(time.Second * time.Duration(pollIntervalS))
 	for {
 		select {
-		case <-exitCh:
-			// event loop sends msg
-			err = errors.New("exit requested")
+		case err = <-exitCh:
+			// event loop exit requested
 			goto err_out
 
 		case <-pollTimer.C:
@@ -572,7 +571,7 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 	cmplChan := make(chan error)
 	verifyChan := make(chan verifyCompletion)
 	runCmdChan := make(chan runCmdState)
-	childExitChan := make(chan bool)
+	childExitChan := make(chan error)
 	signalChan := make(chan os.Signal, 1)
 
 	var ls loopState = loopState{disableTimeouts: params.disableTimeouts}
@@ -704,7 +703,7 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 			log.Printf("Got exit message while in state %d\n",
 				ls.state)
 			if ls.state == poll {
-				childExitChan <- true
+				childExitChan <- errors.New("exit requested")
 				log.Print("waiting for poll routine to exit\n")
 				<-cmplChan
 			}
