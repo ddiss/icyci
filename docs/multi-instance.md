@@ -58,3 +58,12 @@ dev-host> git log --show-notes="icyci*"
 # show results for aarch64 only:
 dev-host> git log --show-notes="icyci-aarch64.*"
 ```
+
+
+Further Recommendations
+-----------------------
+
+If multiple icyCI instances are deployed on a single host with the same remote
+`-source-repo`, then consider setting up a local mirror and using the
+`-source-reference` parameter to reduce network and local storage resource
+consumption; instances will obtain *refs* from the local mirror, if available.
