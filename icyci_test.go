@@ -1947,5 +1947,104 @@ func TestScriptExit(t *testing.T) {
 			t.Fatal("timeout while waiting for spinlk or exit")
 		}
 	}
+}
 
+// check that source-reference (git clone --reference) behaviour works
+func TestSrcReference(t *testing.T) {
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rsltsDir := sdir
+	gitReposInit(t, tdir, sdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// first commit is common between source and ref repos, following clone
+	fileWriteSignedCommit(t, sdir, "src_test.sh", "echo this-is-also-in-ref")
+
+	srefDir := path.Join(tdir, "src_reference_repo")
+	cmd = exec.Command("git", "clone", sdir, srefDir)
+	cmd.Dir = tdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// second commit is only in source repo
+	curCommit := fileWriteSignedCommit(t, sdir, "src_test.sh",
+		"echo only-in-src")
+
+	surl, err := url.Parse(sdir)
+	rsltsUrl, err := url.Parse(rsltsDir)
+	srefUrl, err := url.Parse(srefDir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceRefUrl:   srefUrl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rsltsUrl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1,
+		notesNS:        defNotesNS,
+	}
+
+	evExitChan := make(chan int)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		exitCmpl <- 1
+	}()
+
+	// clone source and add results repo as a remote
+	cloneDir := path.Join(tdir, "test_clone_both")
+	cmd = exec.Command("git", "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", rsltsDir, cloneDir)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	done := false
+	for !done {
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			t.Log("notes arrived")
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "only-in-src" {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			evExitChan <- 1
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for notes or exit")
+		}
+	}
 }

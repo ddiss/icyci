@@ -42,6 +42,7 @@ func vers() {
 
 type cliParams struct {
 	sourceUrl       *url.URL
+	sourceRefUrl    *url.URL
 	sourceBranch    string
 	testScript      string
 	resultsUrl      *url.URL
@@ -100,14 +101,18 @@ const (
 	resultsRemote = "results"
 )
 
-func cloneRepo(ch chan<- error, workDir string, sUrl *url.URL,
+func cloneRepo(ch chan<- error, workDir string, sUrl *url.URL, sRefUrl *url.URL,
 	branch string, rUrl *url.URL, targetDir string) {
 	// TODO branch is not sanitized. Ignore submodules for now.
 	if branch == "" {
 		log.Fatal("empty branch name")
 	}
 	gitArgs := []string{"clone", "--no-checkout", "--single-branch",
-		"--branch", branch, sUrl.String(), targetDir}
+		"--branch", branch}
+	if sRefUrl != nil {
+		gitArgs = append(gitArgs, "--reference", sRefUrl.String())
+	}
+	gitArgs = append(gitArgs, sUrl.String(), targetDir)
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = workDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -599,7 +604,7 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 	var ls loopState = loopState{disableTimeouts: params.disableTimeouts}
 	transitionState(clone, &ls)
 	go func() {
-		cloneRepo(cmplChan, workDir, params.sourceUrl,
+		cloneRepo(cmplChan, workDir, params.sourceUrl, params.sourceRefUrl,
 			params.sourceBranch, params.resultsUrl, sourceDir)
 	}()
 
@@ -809,6 +814,16 @@ func main() {
 	flag.Func("timeout", "Individual `state:duration` timeout. E.g. "+
 		"\"await-command:1h\" fails a test script if runtime exceeds an hour",
 		parseStateTimeout)
+	flag.Func("source-reference",
+		"Git clone reference `URL` to obtain objects from",
+		func(s string) error {
+			params.sourceRefUrl, err = url.Parse(s)
+			if err != nil {
+				log.Fatalf("invalid source-reference URL \"%s\": %v\n",
+					s, err)
+			}
+			return nil
+		})
 	flag.Parse()
 
 	if printVers {
