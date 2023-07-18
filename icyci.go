@@ -91,13 +91,13 @@ var states = map[State]stateDesc{
 
 const (
 	// notes refs are preceeded by a namespace, which defaults to:
-	defNotesNS  = "icyci"
-	lockNotes   = ".locked"
-	stdoutNotes = ".output.stdout"
-	stderrNotes = ".output.stderr"
-	passedNotes = ".result.passed"
-	failedNotes = ".result.failed"
-	resultsRemote  = "results"
+	defNotesNS    = "icyci"
+	lockNotes     = ".locked"
+	stdoutNotes   = ".output.stdout"
+	stderrNotes   = ".output.stderr"
+	passedNotes   = ".result.passed"
+	failedNotes   = ".result.failed"
+	resultsRemote = "results"
 )
 
 func cloneRepo(ch chan<- error, workDir string, sUrl *url.URL,
@@ -189,7 +189,7 @@ err_out:
 // lock to flags us as owner for testing this commit
 func pushLock(ch chan<- error, sourceDir string, branch string, notesNS string) {
 	var err error = nil
-	lockNotesRef := "refs/notes/"+notesNS+lockNotes
+	lockNotesRef := "refs/notes/" + notesNS + lockNotes
 
 	for retries := 10; retries > 0; retries-- {
 
@@ -343,8 +343,8 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, notesNS string,
 		msg = fmt.Sprintf("%s completed successfully",
 			cmdState.cmd.Path)
 	} else {
-		stdoutNotesRef := "refs/notes/"+notesNS+stdoutNotes
-		stderrNotesRef := "refs/notes/"+notesNS+stderrNotes
+		stdoutNotesRef := "refs/notes/" + notesNS + stdoutNotes
+		stderrNotesRef := "refs/notes/" + notesNS + stderrNotes
 		msg = fmt.Sprintf("%s failed: %v\nSee %s and %s for details",
 			cmdState.cmd.Path, cmdState.scriptStatus,
 			stdoutNotesRef, stderrNotesRef)
@@ -380,8 +380,8 @@ func pushResults(ch chan<- error, sourceDir string,
 		msg string
 	}
 	var res notesOut
-	stdoutNotesRef := "refs/notes/"+notesNS+stdoutNotes
-	stderrNotesRef := "refs/notes/"+notesNS+stderrNotes
+	stdoutNotesRef := "refs/notes/" + notesNS + stdoutNotes
+	stderrNotesRef := "refs/notes/" + notesNS + stderrNotes
 	var notesName string
 
 	if cmpl.scriptStatus == nil {
@@ -389,7 +389,7 @@ func pushResults(ch chan<- error, sourceDir string,
 	} else {
 		notesName = failedNotes
 	}
-	res = notesOut{ns: "refs/notes/"+notesNS+notesName, msg: cmpl.summaryP}
+	res = notesOut{ns: "refs/notes/" + notesNS + notesName, msg: cmpl.summaryP}
 
 	for retries := 10; retries > 0; retries-- {
 		// fetch ensures we don't conflict, may fail if never pushed
@@ -573,8 +573,8 @@ func transitionState(newState State, ls *loopState) {
 		if oldState != poll && !ls.transitionTimer.Stop() {
 			// select + default to avoid deadlock when already drained
 			select {
-				case <-ls.transitionTimer.C:
-				default:
+			case <-ls.transitionTimer.C:
+			default:
 			}
 		}
 
@@ -763,7 +763,7 @@ func parseStateTimeout(state_duration string) error {
 		state = awaitCmd
 	default:
 		log.Printf("-timeout state %s invalid. Supported: %s (default %v).\n",
-			state_dur[0], "await-command", states[awaitCmd].timeout);
+			state_dur[0], "await-command", states[awaitCmd].timeout)
 		return errors.New("-timeout state invalid")
 	}
 
