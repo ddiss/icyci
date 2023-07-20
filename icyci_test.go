@@ -206,13 +206,9 @@ func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
 // - test script is in the source repo
 // - single icyCI instance trusting only one key
 func TestSeparateSrcRslt(t *testing.T) {
+	var err error
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src")
@@ -310,18 +306,14 @@ func TestSeparateSrcRslt(t *testing.T) {
 // - wait for new head to be tested successfully
 // - loop over last two items "maxCommitI" times
 func TestNewHeadSameSrcRslt(t *testing.T) {
+	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
 	var curCommit string
 	const maxCommitI int = 3
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -415,18 +407,14 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 // - move source head forward
 // - start new instance
 func TestNewHeadWhileStopped(t *testing.T) {
+	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
 	var curCommit string
 	const maxCommitI int = 3
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -564,18 +552,14 @@ func (lp *logParser) Write(p []byte) (int, error) {
 // - check for lock failure by scraping logs
 // - move forward head and ensure new commit is tested
 func TestStopStart(t *testing.T) {
+	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
 	var curCommit string
 	const maxCommitI int = 3
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -698,18 +682,14 @@ func TestStopStart(t *testing.T) {
 // FIXME icyci currently only polls for heads, so the signed tag needs to be
 // pushed before the new head
 func TestSignedTagUnsignedCommit(t *testing.T) {
+	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
 	var curCommit string
 	const maxCommitI int = 3
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -836,16 +816,12 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 
 // - first commit is signed, then alternate between signed and unsigned
 func TestMixUnsignedSigned(t *testing.T) {
+	var err error
 	var commitI int = 0
 	var curCommit string
 	const maxCommitI int = 4
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -1073,17 +1049,13 @@ func checkResults(t *testing.T, repoDir string, commit string, notesRef string,
 // - wait for the second spinlk file to appear
 // - remove both spinlk files and wait for notes
 func TestMultiInstance(t *testing.T) {
+	var err error
 	cs := commitState{
 		nextCommitI: 0,
 		m:           make(map[int]string),
 	}
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -1233,16 +1205,12 @@ func TestMultiInstance(t *testing.T) {
 
 // - check that ICYCI_X env variables are set within script
 func TestScriptEnv(t *testing.T) {
+	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var curCommit string
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -1318,14 +1286,10 @@ func TestScriptEnv(t *testing.T) {
 
 // - check that SIGUSR1 is processed
 func TestScriptSignalLog(t *testing.T) {
+	var err error
 	grepChan := make(chan bool)
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -1396,15 +1360,11 @@ func TestScriptSignalLog(t *testing.T) {
 // - expect results to also be forced
 // - single icyCI instance trusting only one key
 func TestForcePushSrc(t *testing.T) {
+	var err error
 	var commits = []string{}
 	const maxCommitI int = 4
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src")
@@ -1577,17 +1537,13 @@ func handleSpinlkSeparateNS(t *testing.T, sdir string, cloneDir string,
 // - remove the "spinlk" files to allow the test scripts to complete
 // - wait for result notes to arrive and validate content
 func TestMultiInstanceSeparateNS(t *testing.T) {
+	var err error
 	cs := commitState{
 		nextCommitI: 0,
 		m:           make(map[int]string),
 	}
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -1779,17 +1735,13 @@ func TestStateTimeoutParam(t *testing.T) {
 
 // check that script timeout results in regular failure path
 func TestScriptTimeout(t *testing.T) {
+	var err error
 	var curCommit string
 	// revert to previous timeouts after test
 	states_before_timeout_changes := states
 	defer func() { states = states_before_timeout_changes }()
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -1869,14 +1821,10 @@ func TestScriptTimeout(t *testing.T) {
 
 // exit while test-script is running and confirm that it stops
 func TestScriptExit(t *testing.T) {
+	var err error
 	spinlkChan := make(chan bool)
 
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
-
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
@@ -1951,12 +1899,9 @@ func TestScriptExit(t *testing.T) {
 
 // check that source-reference (git clone --reference) behaviour works
 func TestSrcReference(t *testing.T) {
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tdir)
+	var err error
 
+	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
