@@ -25,7 +25,9 @@ const (
 	userName  = "icyCI test"
 	userEmail = "icyci@example.com"
 	// matches default ref path
+	lockNotesRef = "refs/notes/" + defNotesNS + lockNotes
 	stdoutNotesRef = "refs/notes/" + defNotesNS + stdoutNotes
+	stderrNotesRef = "refs/notes/" + defNotesNS + stderrNotes
 	passedNotesRef = "refs/notes/" + defNotesNS + passedNotes
 	failedNotesRef = "refs/notes/" + defNotesNS + failedNotes
 )
@@ -1969,8 +1971,7 @@ func TestSrcReference(t *testing.T) {
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
-	done := false
-	for !done {
+	for done := false; !done; {
 		select {
 		case notes := <-notesChan:
 			if !waitTimer.Stop() {
@@ -1990,6 +1991,132 @@ func TestSrcReference(t *testing.T) {
 			done = true
 		case <-waitTimer.C:
 			t.Fatal("timeout while waiting for notes or exit")
+		}
+	}
+}
+
+// Run icyCI without a testScript, to provide a simple mirror.
+// flip-flap between signed and unsigned commits, confirming that only signed
+// commits trigger mirroring.
+func TestMirror(t *testing.T) {
+	var err error
+
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src")
+	rdir := path.Join(tdir, "test_rslt")
+	gitReposInit(t, tdir, sdir, rdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commits := []string {fileWriteSignedCommit(t, sdir, "notrun.sh",
+		`echo "this will not be run by icyci"`)}
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	// testScript left empty for mirroring
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		resultsUrl:     rurl,
+		pushSrcToRslts: true,
+		pollIntervalS:  1,
+		notesNS:        defNotesNS,
+	}
+
+	evExitChan := make(chan int)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evExitChan)
+		exitCmpl <- 1
+	}()
+
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, rdir, passedNotesRef, commits[0], notesChan)
+	}()
+
+	grepChan := make(chan bool)
+	lp := logParser{
+		T:      t,
+		needle: []byte("GPG verification of commit at origin/mybranch failed"),
+		ch:     grepChan,
+	}
+	waitTimer := time.NewTimer(time.Second * 10)
+	for done := false; !done; {
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "No -test-script specified" {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			if len(commits) == 5 {
+				evExitChan <- 1
+				continue
+			}
+			log.SetOutput(&lp)
+			c := fileWriteUnsignedCommit(t, sdir, "notrun.sh",
+				`echo "`+strconv.Itoa(len(commits))+`"`)
+			commits = append(commits, c)
+		case <-grepChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			// restore log
+			log.SetOutput(os.Stderr)
+			c := fileWriteSignedCommit(t, sdir, "notrun.sh",
+				`echo "`+strconv.Itoa(len(commits))+`"`)
+			commits = append(commits, c)
+			go func() {
+				waitNotes(t, rdir, passedNotesRef, c, notesChan)
+			}()
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for notes or exit\n")
+		}
+	}
+	t.Logf("source committed: %v", commits)
+
+	// walk commit list to check for (un)expected notes
+	for i, c := range commits {
+		signed := (i & 1 == 0)
+		cmd = exec.Command("git", "notes", "--ref="+lockNotesRef,
+			"show", "--", c)
+		cmd.Dir = rdir
+		cmd.Stdout = os.Stdout
+		err = cmd.Run()
+		if signed && err != nil {
+			t.Fatalf("lock missing on %s\n", c)
+		} else if !signed && err == nil {
+			t.Fatalf("lock unexpectedly found on %s\n", c)
+		}
+
+		// stdout/stderr notes should only be present with a testScript
+		for _, r := range []string{ stdoutNotesRef, stderrNotesRef } {
+			cmd = exec.Command("git", "notes", "--ref="+r,
+				"show", "--", c)
+			cmd.Dir = rdir
+			err = cmd.Run()
+			if err == nil {
+				t.Fatalf("%s unexpectedly found on commit %s\n",
+					r, c)
+			}
 		}
 	}
 }
