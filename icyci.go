@@ -265,6 +265,13 @@ func startCommand(ch chan<- runCmdState, workDir string, sourceDir string,
 		goto err_out
 	}
 
+	cmpl.summaryP = path.Join(workDir, "script.summary")
+	if testScript == "" {
+		ioutil.WriteFile(cmpl.summaryP,
+			[]byte("No -test-script specified"), os.FileMode(0644))
+		goto done
+	}
+
 	cmpl.stdoutP = path.Join(workDir, "script.stdout")
 	cmpl.stdoutF, err = os.Create(cmpl.stdoutP)
 	if err != nil {
@@ -279,11 +286,9 @@ func startCommand(ch chan<- runCmdState, workDir string, sourceDir string,
 		goto err_stdout_close
 	}
 
-	cmpl.summaryP = path.Join(workDir, "script.summary")
-
 	cmd = exec.Command(testScript)
-
-	cmd.Env = append(os.Environ(), "ICYCI_PID="+strconv.Itoa(os.Getpid()))
+	cmd.Env = append(os.Environ(),
+		"ICYCI_PID="+strconv.Itoa(os.Getpid()))
 	cmd.Dir = sourceDir
 	cmd.Stdout = io.MultiWriter(os.Stdout, cmpl.stdoutF)
 	cmd.Stderr = io.MultiWriter(os.Stderr, cmpl.stderrF)
@@ -293,7 +298,7 @@ func startCommand(ch chan<- runCmdState, workDir string, sourceDir string,
 		goto err_stderr_close
 	}
 	cmpl.cmd = cmd
-
+done:
 	ch <- cmpl
 	return
 
@@ -318,6 +323,11 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, notesNS string,
 	cmdState *runCmdState) {
 	var msg string
 	var err error
+
+	if cmdState.cmd == nil {
+		ch <- *cmdState
+		return	// no cmd to wait for
+	}
 
 	cmdWaitChan := make(chan error)
 	go func() {
@@ -384,7 +394,7 @@ func pushResults(ch chan<- error, sourceDir string,
 		ns  string
 		msg string
 	}
-	var res notesOut
+	var allNotes []notesOut
 	stdoutNotesRef := "refs/notes/" + notesNS + stdoutNotes
 	stderrNotesRef := "refs/notes/" + notesNS + stderrNotes
 	var notesName string
@@ -394,14 +404,37 @@ func pushResults(ch chan<- error, sourceDir string,
 	} else {
 		notesName = failedNotes
 	}
-	res = notesOut{ns: "refs/notes/" + notesNS + notesName, msg: cmpl.summaryP}
+
+	allNotes = []notesOut{
+		{ns: "refs/notes/" + notesNS + notesName, msg: cmpl.summaryP},
+	}
+	if cmpl.stdoutP != "" {
+		note := notesOut{ns: stdoutNotesRef, msg: cmpl.stdoutP}
+		allNotes = append(allNotes, note)
+	}
+	if cmpl.stderrP != "" {
+		note := notesOut{ns: stderrNotesRef, msg: cmpl.stderrP}
+		allNotes = append(allNotes, note)
+	}
+
+	gitFetchCmd := []string{"fetch", resultsRemote}
+	gitPushCmd := []string{"push", resultsRemote}
+	for _, note := range allNotes {
+		gitFetchCmd = append(gitFetchCmd, "+"+note.ns+":"+note.ns)
+		gitPushCmd = append(gitPushCmd, note.ns)
+	}
+	if pushSrcToRslts {
+		// force push because 'branch' we fetched previously
+		// may be rebased, i.e. non-fast-forward
+		gitPushCmd = append(gitPushCmd, "+HEAD:refs/heads/"+branch)
+		if tag != "" {
+			gitPushCmd = append(gitPushCmd, "refs/tags/"+tag)
+		}
+	}
 
 	for retries := 10; retries > 0; retries-- {
 		// fetch ensures we don't conflict, may fail if never pushed
-		cmd := exec.Command("git", "fetch", resultsRemote,
-			"+"+stdoutNotesRef+":"+stdoutNotesRef,
-			"+"+stderrNotesRef+":"+stderrNotesRef,
-			"+"+res.ns+":"+res.ns)
+		cmd := exec.Command("git", gitFetchCmd...)
 		cmd.Dir = sourceDir
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err := cmd.Run()
@@ -409,10 +442,7 @@ func pushResults(ch chan<- error, sourceDir string,
 			log.Print("ignoring failure to fetch output git notes")
 		}
 
-		for _, note := range []notesOut{res,
-			{ns: stdoutNotesRef, msg: cmpl.stdoutP},
-			{ns: stderrNotesRef, msg: cmpl.stderrP}} {
-
+		for _, note := range allNotes {
 			gitArgs := []string{"notes", "--ref", note.ns, "add",
 				"--allow-empty", "-F", note.msg,
 				"origin/" + branch}
@@ -426,17 +456,7 @@ func pushResults(ch chan<- error, sourceDir string,
 			}
 		}
 
-		gitArgs := []string{"push", resultsRemote, res.ns,
-			stdoutNotesRef, stderrNotesRef}
-		if pushSrcToRslts {
-			// force push because 'branch' we fetched previously
-			// may be rebased, i.e. non-fast-forward
-			gitArgs = append(gitArgs, "+HEAD:refs/heads/"+branch)
-			if tag != "" {
-				gitArgs = append(gitArgs, "refs/tags/"+tag)
-			}
-		}
-		cmd = exec.Command("git", gitArgs...)
+		cmd = exec.Command("git", gitPushCmd...)
 		cmd.Dir = sourceDir
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err = cmd.Run()
@@ -444,7 +464,7 @@ func pushResults(ch chan<- error, sourceDir string,
 			log.Printf("successfully pushed git notes lock")
 			break
 		}
-		log.Printf("git %v failed: %v", gitArgs, err)
+		log.Printf("git %v failed: %v", gitPushCmd, err)
 
 		if retries > 1 {
 			log.Printf("retrying push after sleep")
@@ -795,7 +815,8 @@ func main() {
 	flag.StringVar(&params.sourceBranch, "source-branch", "main",
 		"Git `branch` for the repository under test")
 	flag.StringVar(&params.testScript, "test-script", "",
-		"Test script `path`, relative to source-repo or absolute (required)")
+		"Command `path` to run on verified branch, relative to "+
+		"source-repo or absolute")
 	flag.StringVar(&resultsRawUrl, "results-repo", "",
 		"Git `URL` to push test results to (required)")
 	// If the corresponding source branch is not pushed, then cloning the
@@ -831,7 +852,7 @@ func main() {
 		return
 	}
 
-	if srcRawUrl == "" || resultsRawUrl == "" || params.testScript == "" {
+	if srcRawUrl == "" || resultsRawUrl == "" {
 		usage()
 		return
 	}
