@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -2118,5 +2119,75 @@ func TestMirror(t *testing.T) {
 					r, c)
 			}
 		}
+	}
+}
+
+func TestCliArgs(t *testing.T) {
+	args := os.Args	// backup / restore for testing
+	defer func() {
+		os.Args = args
+	}()
+
+	os.Args = []string{ "icyci",
+		"--source-repo", "https://token:@example.com/source.git",
+		"--source-branch", "icyci-demo", "--test-script", "/test.sh",
+		"--results-repo", "https://token:@example.com/results.git",
+		"--source-reference", "/local/dir/linux.git",
+		"--push-source-to-results=false", "--poll-interval", "60",
+	}
+	params := parseCliArgs(func (exitCode int) {
+		t.Fatalf("unexpected exit request: %d", exitCode)
+	})
+
+	if params.sourceUrl == nil ||
+		params.sourceUrl.String() != "https://token:@example.com/source.git" {
+		t.Fatalf("unexpected sourceRefUrl %v\n", params.sourceRefUrl)
+	}
+
+	if params.sourceBranch != "icyci-demo" {
+		t.Fatalf("unexpected sourceBranch %v\n", params.sourceBranch)
+	}
+
+	if params.testScript != "/test.sh" {
+		t.Fatalf("unexpected testScript %s\n", params.testScript)
+	}
+
+	if params.resultsUrl == nil ||
+		params.sourceUrl.String() != "https://token:@example.com/source.git" {
+		t.Fatalf("unexpected sourceRefUrl %v\n", params.sourceRefUrl)
+	}
+
+	if params.sourceRefUrl == nil ||
+		params.sourceRefUrl.String() != "/local/dir/linux.git" {
+		t.Fatalf("unexpected sourceRefUrl %v\n", params.sourceRefUrl)
+	}
+
+	if params.pushSrcToRslts {
+		t.Fatalf("unexpected pushSrcToRslts %v\n",
+			params.pushSrcToRslts)
+	}
+
+	if params.pollIntervalS != 60 {
+		t.Fatalf("unexpected pollIntervalS %d\n", params.pollIntervalS)
+	}
+
+	// https://github.com/ddiss/icyci/issues/4
+	// bogus --push-source-to-results bool setting
+	os.Args = []string{ "icyci",
+		"--source-repo", "https://token:@example.com/source.git",
+		"--source-branch", "icyci-demo", "--test-script", "/test.sh",
+		"--results-repo", "https://token:@example.com/results.git",
+		"--source-reference", "/local/dir/linux.git",
+		"--push-source-to-results", "true", "--poll-interval", "60",
+	}
+	// reinit for another flag.Parse() call
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	var exitedCode *int
+	params = parseCliArgs(func (exitCode int) {
+		exitedCode = new(int)
+		*exitedCode = exitCode
+	})
+	if exitedCode == nil || *exitedCode == 0 {
+		t.Fatalf("unexpected exit request: %v", exitedCode)
 	}
 }
