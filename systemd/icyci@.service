@@ -6,7 +6,7 @@ After=network-online.target
 EnvironmentFile=-/etc/sysconfig/icyci
 EnvironmentFile=-/etc/icyci/%i.conf
 User=icyci
-ExecStart=/bin/icyci --source-repo ${SOURCE_REPO} --source-branch ${SOURCE_BRANCH} --test-script ${TEST_SCRIPT} --results-repo ${RESULTS_REPO} --push-source-to-results ${PUSH_SOURCE_TO_RESULTS} --poll-interval ${POLL_INTERVAL}
+ExecStart=/bin/icyci --source-repo=${SOURCE_REPO} --source-branch=${SOURCE_BRANCH} --test-script=${TEST_SCRIPT} --results-repo=${RESULTS_REPO} --push-source-to-results=${PUSH_SOURCE_TO_RESULTS} --poll-interval=${POLL_INTERVAL}
 
 [Install]
 WantedBy=multi-user.target
