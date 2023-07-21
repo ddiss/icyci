@@ -802,7 +802,7 @@ func parseStateTimeout(state_duration string) error {
 	return nil
 }
 
-func main() {
+func parseCliArgs(exit func(int)) *cliParams {
 	var srcRawUrl string
 	var resultsRawUrl string
 	var printVers bool
@@ -840,34 +840,49 @@ func main() {
 		func(s string) error {
 			params.sourceRefUrl, err = url.Parse(s)
 			if err != nil {
-				log.Fatalf("invalid source-reference URL \"%s\": %v\n",
+				log.Printf("invalid source-reference URL \"%s\": %v\n",
 					s, err)
+				exit(1)
 			}
-			return nil
+			return err
 		})
 	flag.Parse()
+	if len(flag.Args()) > 0 {
+		log.Printf("Unprocessed arguments: %v", flag.Args())
+		exit(1)
+	}
 
 	if printVers {
 		vers()
-		return
+		exit(0)
 	}
 
 	if srcRawUrl == "" || resultsRawUrl == "" {
 		usage()
-		return
+		exit(1)
 	}
 
 	params.sourceUrl, err = url.Parse(srcRawUrl)
 	if err != nil {
-		log.Fatalf("failed to parse URL \"%s\": %v\n",
+		log.Printf("failed to parse URL \"%s\": %v\n",
 			srcRawUrl, err)
+		exit(1)
 	}
 
 	params.resultsUrl, err = url.Parse(resultsRawUrl)
 	if err != nil {
-		log.Fatalf("failed to parse URL \"%s\": %v\n",
+		log.Printf("failed to parse URL \"%s\": %v\n",
 			resultsRawUrl, err)
+		exit(1)
 	}
+
+	return params
+}
+
+func main() {
+	params := parseCliArgs(func (exitCode int) {
+		os.Exit(exitCode)
+	})
 
 	cwd, err := os.Getwd()
 	if err != nil {
