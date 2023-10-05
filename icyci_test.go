@@ -243,9 +243,9 @@ func TestSeparateSrcRslt(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -291,7 +291,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 				t.Fatalf("%s does not match expected\n", snotes)
 			}
 			// tell icyCI eventLoop to end
-			evExitChan <- 1
+			evSigChan <- 1
 			wg.Wait()
 			if !notesWaitTimer.Stop() {
 				<-notesWaitTimer.C
@@ -349,9 +349,9 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -382,7 +382,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 			}
 			if commitI == maxCommitI {
 				// Finished, tell icyCI eventLoop to end
-				evExitChan <- 1
+				evSigChan <- 1
 				wg.Wait()
 				return
 			}
@@ -450,10 +450,10 @@ func TestNewHeadWhileStopped(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
 		t.Log("starting icyCI eventLoop")
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -484,7 +484,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 			}
 
 			t.Log("telling icyCI eventLoop to end")
-			evExitChan <- 1
+			evSigChan <- 1
 			wg.Wait()
 
 			if commitI >= maxCommitI {
@@ -505,7 +505,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 				// explicitly delete the "source" working dir
 				os.RemoveAll(path.Join(tdir, "source"))
 				t.Log("starting icyCI eventLoop")
-				eventLoop(&params, tdir, evExitChan)
+				eventLoop(&params, tdir, evSigChan)
 				wg.Done()
 			}()
 			go func() {
@@ -595,10 +595,10 @@ func TestStopStart(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
 		t.Log("starting icyCI eventLoop")
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -630,7 +630,7 @@ func TestStopStart(t *testing.T) {
 			}
 
 			t.Log("telling icyCI eventLoop to end")
-			evExitChan <- 1
+			evSigChan <- 1
 			wg.Wait()
 
 			if commitI >= maxCommitI {
@@ -651,7 +651,7 @@ func TestStopStart(t *testing.T) {
 				// explicitly delete the "source" working dir
 				os.RemoveAll(path.Join(tdir, "source"))
 				t.Log("starting icyCI eventLoop")
-				eventLoop(&params, tdir, evExitChan)
+				eventLoop(&params, tdir, evSigChan)
 				wg.Done()
 			}()
 			if !notesWaitTimer.Stop() {
@@ -753,9 +753,9 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -775,7 +775,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 			}
 			if commitI == maxCommitI {
 				// Finished, tell icyCI eventLoop to end
-				evExitChan <- 1
+				evSigChan <- 1
 				wg.Wait()
 				return
 			}
@@ -857,10 +857,10 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
 		t.Log("starting icyCI eventLoop")
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -896,7 +896,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 			if commitI >= maxCommitI {
 				// Finished, tell icyCI eventLoop to end
-				evExitChan <- 1
+				evSigChan <- 1
 				wg.Wait()
 				return
 			}
@@ -959,7 +959,7 @@ type instanceState struct {
 	spinlk     string
 	spinlkChan chan bool
 	wg         sync.WaitGroup
-	evExitChan chan int
+	evSigChan  chan int
 	commit     string
 	commitI    int
 	notesChan  chan bytes.Buffer
@@ -1104,7 +1104,7 @@ func TestMultiInstance(t *testing.T) {
 			notesNS:        defNotesNS,
 		}
 
-		i.evExitChan = make(chan int)
+		i.evSigChan = make(chan int)
 		i.spinlkChan = make(chan bool)
 		i.notesChan = make(chan bytes.Buffer)
 	}
@@ -1122,13 +1122,13 @@ func TestMultiInstance(t *testing.T) {
 	i1.wg.Add(1)
 	go func() {
 		t.Log("starting i1 icyCI eventLoop")
-		eventLoop(&i1.params, i1.tmpDir, i1.evExitChan)
+		eventLoop(&i1.params, i1.tmpDir, i1.evSigChan)
 		i1.wg.Done()
 	}()
 	i2.wg.Add(1)
 	go func() {
 		t.Log("starting i2 icyCI eventLoop")
-		eventLoop(&i2.params, i2.tmpDir, i2.evExitChan)
+		eventLoop(&i2.params, i2.tmpDir, i2.evSigChan)
 		i2.wg.Done()
 	}()
 
@@ -1201,7 +1201,7 @@ func TestMultiInstance(t *testing.T) {
 		checkResults(t, cloneDir, i.commit, passedNotesRef,
 			i.params.testScript+" completed successfully")
 		// tell icyCI eventLoop to end
-		i.evExitChan <- 1
+		i.evSigChan <- 1
 		i.wg.Wait()
 	}
 }
@@ -1244,9 +1244,9 @@ func TestScriptEnv(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -1277,7 +1277,7 @@ func TestScriptEnv(t *testing.T) {
 			}
 
 			// Finished, tell icyCI eventLoop to end
-			evExitChan <- 1
+			evSigChan <- 1
 			wg.Wait()
 			return
 
@@ -1323,9 +1323,9 @@ func TestScriptSignalLog(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -1348,7 +1348,7 @@ func TestScriptSignalLog(t *testing.T) {
 			log.SetOutput(os.Stderr)
 			t.Logf("log grep successful")
 			// Finished, tell icyCI eventLoop to end
-			evExitChan <- 1
+			evSigChan <- 1
 			wg.Wait()
 			return
 
@@ -1400,9 +1400,9 @@ func TestForcePushSrc(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -1449,7 +1449,7 @@ event_loop:
 				t.Fatalf("%s does not match expected\n", snotes)
 			}
 			if len(commits) >= maxCommitI {
-				evExitChan <- 1
+				evSigChan <- 1
 				wg.Wait()
 				break event_loop
 			}
@@ -1591,7 +1591,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 			notesNS:        "icyci-" + i.id,
 		}
 
-		i.evExitChan = make(chan int)
+		i.evSigChan = make(chan int)
 		i.spinlkChan = make(chan bool)
 		i.notesChan = make(chan bytes.Buffer)
 	}
@@ -1609,13 +1609,13 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 	i1.wg.Add(1)
 	go func() {
 		t.Log("starting i1 icyCI eventLoop")
-		eventLoop(&i1.params, i1.tmpDir, i1.evExitChan)
+		eventLoop(&i1.params, i1.tmpDir, i1.evSigChan)
 		i1.wg.Done()
 	}()
 	i2.wg.Add(1)
 	go func() {
 		t.Log("starting i2 icyCI eventLoop")
-		eventLoop(&i2.params, i2.tmpDir, i2.evExitChan)
+		eventLoop(&i2.params, i2.tmpDir, i2.evSigChan)
 		i2.wg.Done()
 	}()
 
@@ -1688,7 +1688,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 		checkResults(t, cloneDir, i.commit,
 			"refs/notes/icyci-"+i.id+passedNotes,
 			i.params.testScript+" completed successfully")
-		i.evExitChan <- 1
+		i.evSigChan <- 1
 		i.wg.Wait()
 	}
 }
@@ -1780,9 +1780,9 @@ func TestScriptTimeout(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		wg.Done()
 	}()
 
@@ -1812,7 +1812,7 @@ func TestScriptTimeout(t *testing.T) {
 				"./src_test.sh failed: 500ms await-command timeout") {
 				t.Fatalf("%s does not match expected\n", fnotes)
 			}
-			evExitChan <- 1
+			evSigChan <- 1
 			wg.Wait()
 			return
 
@@ -1862,10 +1862,10 @@ func TestScriptExit(t *testing.T) {
 		notesNS:        defNotesNS,
 	}
 
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	exitCmpl := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		exitCmpl <- 1
 	}()
 
@@ -1878,7 +1878,7 @@ func TestScriptExit(t *testing.T) {
 				<-waitTimer.C
 			}
 			waitTimer.Reset(time.Second * 10)
-			evExitChan <- 1
+			evSigChan <- 1
 		case <-exitCmpl:
 			if !waitTimer.Stop() {
 				<-waitTimer.C
@@ -1949,10 +1949,10 @@ func TestSrcReference(t *testing.T) {
 		notesNS:        defNotesNS,
 	}
 
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	exitCmpl := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		exitCmpl <- 1
 	}()
 
@@ -1983,7 +1983,7 @@ func TestSrcReference(t *testing.T) {
 			if snotes != "only-in-src" {
 				t.Fatalf("%s does not match expected\n", snotes)
 			}
-			evExitChan <- 1
+			evSigChan <- 1
 			waitTimer.Reset(time.Second * 10)
 		case <-exitCmpl:
 			if !waitTimer.Stop() {
@@ -2032,10 +2032,10 @@ func TestMirror(t *testing.T) {
 		notesNS:        defNotesNS,
 	}
 
-	evExitChan := make(chan int)
+	evSigChan := make(chan int)
 	exitCmpl := make(chan int)
 	go func() {
-		eventLoop(&params, tdir, evExitChan)
+		eventLoop(&params, tdir, evSigChan)
 		exitCmpl <- 1
 	}()
 
@@ -2063,7 +2063,7 @@ func TestMirror(t *testing.T) {
 				t.Fatalf("%s does not match expected\n", snotes)
 			}
 			if len(commits) == 5 {
-				evExitChan <- 1
+				evSigChan <- 1
 				continue
 			}
 			log.SetOutput(&lp)

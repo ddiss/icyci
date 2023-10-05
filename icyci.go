@@ -611,7 +611,7 @@ func transitionState(newState State, ls *loopState) {
 }
 
 // event loop to track state of clone, verify, test, push progress
-func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
+func eventLoop(params *cliParams, workDir string, evSigChan chan int) {
 
 	sourceDir := path.Join(workDir, "source")
 
@@ -755,7 +755,7 @@ func eventLoop(params *cliParams, workDir string, evExitChan chan int) {
 		case s := <-signalChan:
 			log.Printf("Got signal %d while in state %d\n",
 				s, ls.state)
-		case <-evExitChan:
+		case <-evSigChan:
 			log.Printf("Got exit message while in state %d\n",
 				ls.state)
 			if ls.state == poll {
