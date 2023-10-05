@@ -619,7 +619,6 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 	verifyChan := make(chan verifyCompletion)
 	runCmdChan := make(chan runCmdState)
 	childExitChan := make(chan error)
-	signalChan := make(chan os.Signal, 1)
 
 	var ls loopState = loopState{disableTimeouts: params.disableTimeouts}
 	transitionState(clone, &ls)
@@ -664,9 +663,6 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 			// state
 			case lock:
 				transitionState(startCmd, &ls)
-				// accept signals to push notes prior to cmd
-				// completion
-				signal.Notify(signalChan, syscall.SIGUSR1)
 				go func() {
 					startCommand(runCmdChan, workDir,
 						sourceDir, params.sourceBranch,
@@ -731,8 +727,6 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 						params.notesNS, &runCmdState)
 				}()
 			case awaitCmd:
-				// stop accepting signals as on-demand push reqs
-				signal.Stop(signalChan)
 				transitionState(push, &ls)
 				go func() {
 					pushResults(cmplChan, sourceDir,
@@ -752,10 +746,9 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 				log.Fatalf("State %v transition timeout!",
 					ls.state)
 			}
-		case s := <-signalChan:
+		case s := <-evSigChan:
 			log.Printf("Got signal %d while in state %d\n",
 				s, ls.state)
-		case s := <-evSigChan:
 			if s != syscall.SIGTERM {
 				log.Printf("unexpected signal: %v\n", s)
 				continue
@@ -906,5 +899,9 @@ func main() {
 	}
 	defer os.Chdir(cwd)
 
-	eventLoop(params, wdir, nil)
+	evSigChan := make(chan os.Signal)
+	// TODO: SIGUSR1 requests notes push prior to cmd completion
+	signal.Notify(evSigChan, syscall.SIGUSR1)
+	eventLoop(params, wdir, evSigChan)
+	signal.Stop(evSigChan)
 }

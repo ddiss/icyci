@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"strconv"
 	"strings"
@@ -1325,7 +1326,9 @@ func TestScriptSignalLog(t *testing.T) {
 	wg.Add(1)
 	evSigChan := make(chan os.Signal)
 	go func() {
+		signal.Notify(evSigChan, syscall.SIGUSR1)
 		eventLoop(&params, tdir, evSigChan)
+		signal.Stop(evSigChan)
 		wg.Done()
 	}()
 
