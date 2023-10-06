@@ -901,7 +901,7 @@ func main() {
 
 	evSigChan := make(chan os.Signal)
 	// TODO: SIGUSR1 requests notes push prior to cmd completion
-	signal.Notify(evSigChan, syscall.SIGUSR1)
+	signal.Notify(evSigChan, syscall.SIGUSR1, syscall.SIGTERM)
 	eventLoop(params, wdir, evSigChan)
 	signal.Stop(evSigChan)
 }
