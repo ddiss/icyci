@@ -242,7 +242,8 @@ err_out:
 }
 
 type runCmdState struct {
-	cmd          *exec.Cmd
+	pgid         int
+	cmdWaitChan  chan error
 	stdoutP      string
 	stdoutF      *os.File
 	stderrP      string
@@ -269,7 +270,8 @@ func startCommand(ch chan<- runCmdState, workDir string, sourceDir string,
 	if testScript == "" {
 		ioutil.WriteFile(cmpl.summaryP,
 			[]byte("No -test-script specified"), os.FileMode(0644))
-		goto done
+		ch <- cmpl
+		return
 	}
 
 	cmpl.stdoutP = path.Join(workDir, "script.stdout")
@@ -286,29 +288,40 @@ func startCommand(ch chan<- runCmdState, workDir string, sourceDir string,
 		goto err_stdout_close
 	}
 
-	cmd = exec.Command(testScript)
-	cmd.Env = append(os.Environ(),
-		"ICYCI_PID="+strconv.Itoa(os.Getpid()))
-	cmd.Dir = sourceDir
-	cmd.Stdout = io.MultiWriter(os.Stdout, cmpl.stdoutF)
-	cmd.Stderr = io.MultiWriter(os.Stderr, cmpl.stderrF)
-	err = cmd.Start()
-	if err != nil {
-		log.Printf("test %s failed to start: %v", testScript, err)
-		goto err_stderr_close
-	}
-	cmpl.cmd = cmd
-done:
-	ch <- cmpl
+	cmpl.cmdWaitChan = make(chan error)
+	go func() {
+		cmd = exec.Command(testScript)
+		cmd.Env = append(os.Environ(),
+			"ICYCI_PID="+strconv.Itoa(os.Getpid()))
+		cmd.Dir = sourceDir
+		cmd.Stdout = io.MultiWriter(os.Stdout, cmpl.stdoutF)
+		cmd.Stderr = io.MultiWriter(os.Stderr, cmpl.stderrF)
+		// set Process Group ID to PID of the newly spawned process
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		err := cmd.Start()
+		if err != nil {
+			log.Printf("test %s failed to start: %v", testScript, err)
+			cmpl.scriptStatus = err
+			cmpl.err = err
+			ch <- cmpl
+			return
+		}
+		cmpl.pgid = cmd.Process.Pid
+
+		// notification of start goes through regular completion channel
+		ch <- cmpl
+
+		// notification of cmd completion goes via a separate channel
+		// monitored by awaitCommand()...
+		cmpl.cmdWaitChan <- cmd.Wait()
+	}()
 	return
 
-err_stderr_close:
-	cmpl.stderrF.Close()
 err_stdout_close:
 	cmpl.stdoutF.Close()
 err_out:
 	ch <- runCmdState{
-		cmd:          nil,
+		cmdWaitChan:  nil,
 		stdoutP:      "",
 		stdoutF:      nil,
 		stderrP:      "",
@@ -319,33 +332,29 @@ err_out:
 }
 
 // @exitCh can be used to kill the cmd process on timeout / exit
-func awaitCommand(ch chan<- runCmdState, exitCh chan error, notesNS string,
-	cmdState *runCmdState) {
+func awaitCommand(ch chan<- runCmdState, exitCh chan error, cmdPath string,
+	notesNS string, cmdState *runCmdState) {
 	var msg string
 	var err error
 
-	if cmdState.cmd == nil {
+	if cmdState.cmdWaitChan == nil {
 		ch <- *cmdState
 		return	// no cmd to wait for
 	}
 
-	cmdWaitChan := make(chan error)
-	go func() {
-		status := cmdState.cmd.Wait()
-		cmdWaitChan <- status
-	}()
-
 	for done := false; !done; {
 		select {
-		case cmdStatus := <-cmdWaitChan:
-			// don't overwrite exitCh error with Kill() status
+		case cmdStatus := <-cmdState.cmdWaitChan:
+			// don't overwrite exitCh error with Kill() status. Also
+			// retain any cmd.Start() error.
 			if cmdState.scriptStatus == nil {
 				cmdState.scriptStatus = cmdStatus
 			}
 			done = true
 		case err = <-exitCh:
-			cmdState.cmd.Process.Kill()
-			log.Printf("got exit request: %v\n", err)
+			syscall.Kill(-cmdState.pgid, syscall.SIGKILL)
+			log.Printf("killed PGID %d due to exit request: %v\n",
+				cmdState.pgid, err)
 			cmdState.scriptStatus = err
 		}
 	}
@@ -355,13 +364,12 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, notesNS string,
 	cmdState.stderrF.Close()
 
 	if cmdState.scriptStatus == nil {
-		msg = fmt.Sprintf("%s completed successfully",
-			cmdState.cmd.Path)
+		msg = fmt.Sprintf("%s completed successfully", cmdPath)
 	} else {
 		stdoutNotesRef := "refs/notes/" + notesNS + stdoutNotes
 		stderrNotesRef := "refs/notes/" + notesNS + stderrNotes
 		msg = fmt.Sprintf("%s failed: %v\nSee %s and %s for details",
-			cmdState.cmd.Path, cmdState.scriptStatus,
+			cmdPath, cmdState.scriptStatus,
 			stdoutNotesRef, stderrNotesRef)
 	}
 	log.Print(msg + "\n")
@@ -374,7 +382,6 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, notesNS string,
 	return
 err_out:
 	ch <- runCmdState{
-		cmd:          nil,
 		stdoutP:      "",
 		stdoutF:      nil,
 		stderrP:      "",
@@ -724,6 +731,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 				transitionState(awaitCmd, &ls)
 				go func() {
 					awaitCommand(runCmdChan, childExitChan,
+						params.testScript,
 						params.notesNS, &runCmdState)
 				}()
 			case awaitCmd:
