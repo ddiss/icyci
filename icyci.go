@@ -302,8 +302,8 @@ func startCommand(ch chan<- runCmdState, workDir string, sourceDir string,
 		if err != nil {
 			log.Printf("test %s failed to start: %v", testScript, err)
 			cmpl.scriptStatus = err
-			cmpl.err = err
 			ch <- cmpl
+			cmpl.cmdWaitChan <- nil // awaitCommand retains err above
 			return
 		}
 		cmpl.pgid = cmd.Process.Pid
@@ -327,7 +327,7 @@ err_out:
 		stderrP:      "",
 		stderrF:      nil,
 		summaryP:     "",
-		scriptStatus: err,
+		scriptStatus: nil,
 		err:          err}
 }
 
@@ -352,6 +352,9 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, cmdPath string,
 			}
 			done = true
 		case err = <-exitCh:
+			if (cmdState.pgid == 0) {
+				continue	// not started
+			}
 			syscall.Kill(-cmdState.pgid, syscall.SIGKILL)
 			log.Printf("killed PGID %d due to exit request: %v\n",
 				cmdState.pgid, err)
