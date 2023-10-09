@@ -2267,3 +2267,81 @@ func TestScriptSigterm(t *testing.T) {
 		}
 	}
 }
+
+func TestBadCmd(t *testing.T) {
+	var err error
+
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	srdir := path.Join(tdir, "test_src_and_rslt")
+	gitReposInit(t, tdir, srdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = srdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commits := []string {fileWriteSignedCommit(t, srdir, "notrun.sh",
+		`echo "this will not be run by icyci"`)}
+
+	srurl, err := url.Parse(srdir)
+	params := cliParams{
+		sourceUrl:      srurl,
+		sourceBranch:   "mybranch",
+		testScript:     "./does_not_exist.sh",	// ENOENT
+		resultsUrl:     srurl,
+		pushSrcToRslts: true,
+		pollIntervalS:  1,
+		notesNS:        defNotesNS,
+	}
+	emsg := "./does_not_exist.sh failed: fork/exec ./does_not_exist.sh: " +
+		"no such file or directory"
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, srdir, failedNotesRef, commits[0], notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for done := false; !done; {
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if !strings.HasPrefix(snotes, emsg) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			if len(commits) == 2 {
+				evSigChan <- syscall.SIGTERM
+				continue
+			}
+			c := fileWriteSignedCommit(t, srdir, "notrun.sh", "")
+			commits = append(commits, c)
+			go func() {
+				waitNotes(t, srdir, failedNotesRef, c, notesChan)
+			}()
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for notes or exit\n")
+		}
+	}
+	t.Logf("source committed: %v", commits)
+}
