@@ -2194,3 +2194,76 @@ func TestCliArgs(t *testing.T) {
 		t.Fatalf("unexpected exit request: %v", exitedCode)
 	}
 }
+
+func TestScriptSigterm(t *testing.T) {
+	var err error
+	grepChan := make(chan bool)
+
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = sdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// long sleep used to confirm that SIGTERM results in cmd termination
+	_ = fileWriteSignedCommit(t, sdir, "src_test.sh",
+		`kill -SIGTERM "$ICYCI_PID"; sleep 100`)
+
+	surl, err := url.Parse(sdir)
+	rurl, err := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		signal.Notify(evSigChan, syscall.SIGUSR1, syscall.SIGTERM)
+		eventLoop(&params, tdir, evSigChan)
+		signal.Stop(evSigChan)
+		exitCmpl <- 1
+	}()
+
+	msg := fmt.Sprintf("Got exit message while in state %d\n",
+		awaitCmd)
+	lp := logParser{
+		T:      t,
+		needle: []byte(msg),
+		ch:     grepChan,
+	}
+	log.SetOutput(&lp)
+	t.Logf("parsing icyCI log for: %s", msg)
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case <-grepChan:
+			// restore log
+			log.SetOutput(os.Stderr)
+			t.Logf("log grep successful")
+			// wait for SIGTERM to cause icyCI eventLoop to end
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			return
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for SIGTERM handling\n")
+		}
+	}
+}
