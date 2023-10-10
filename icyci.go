@@ -105,7 +105,7 @@ func cloneRepo(ch chan<- error, workDir string, sUrl *url.URL, sRefUrl *url.URL,
 	branch string, rUrl *url.URL, targetDir string) {
 	// TODO branch is not sanitized. Ignore submodules for now.
 	if branch == "" {
-		log.Fatal("empty branch name")
+		log.Panic("empty branch name")
 	}
 	gitArgs := []string{"clone", "--no-checkout", "--single-branch",
 		"--branch", branch}
@@ -591,7 +591,7 @@ func transitionState(newState State, ls *loopState) {
 
 	_, exists := states[newState]
 	if !exists {
-		log.Fatalf("no states entry for %d\n", newState)
+		log.Panicf("no states entry for %d\n", newState)
 	}
 
 	log.Printf("transitioning from state %d: %s -> %d: %s\n",
@@ -657,7 +657,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 					continue
 				}
 				// other errors are fatal
-				log.Fatal(err)
+				log.Panic(err)
 			}
 
 			log.Printf("%s completed successfully\n",
@@ -700,7 +700,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 						params.sourceBranch)
 				}()
 			default:
-				log.Fatalf("unhandled completion in state %s",
+				log.Panicf("unhandled completion in state %s",
 					states[ls.state].desc)
 			}
 		case verifyCmpl := <-verifyChan:
@@ -726,7 +726,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 
 		case runCmdState := <-runCmdChan:
 			if runCmdState.err != nil {
-				log.Fatal(runCmdState.err)
+				log.Panic(runCmdState.err)
 			}
 
 			switch ls.state {
@@ -754,7 +754,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 					states[awaitCmd].timeout)
 				childExitChan <- err
 			} else {
-				log.Fatalf("State %v transition timeout!",
+				log.Panicf("State %v transition timeout!",
 					ls.state)
 			}
 		case s := <-evSigChan:
@@ -894,19 +894,19 @@ func main() {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 
 	// create a directory to use for staging source, etc.
 	wdir, err := ioutil.TempDir("", "icyci-workspace")
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 	defer os.RemoveAll(wdir)
 
 	err = os.Chdir(wdir)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 	defer os.Chdir(cwd)
 
