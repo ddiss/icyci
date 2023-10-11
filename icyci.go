@@ -334,7 +334,7 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, cmdPath string,
 	done := false
 
 	if cmdState.cmdWaitChan == nil {
-		done = true	// no cmd to wait for
+		done = true // no cmd to wait for
 	}
 
 	for !done {
@@ -347,8 +347,8 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, cmdPath string,
 			}
 			done = true
 		case err = <-exitCh:
-			if (cmdState.pgid == 0) {
-				continue	// not started
+			if cmdState.pgid == 0 {
+				continue // not started
 			}
 			syscall.Kill(-cmdState.pgid, syscall.SIGKILL)
 			log.Printf("killed PGID %d due to exit request: %v\n",
@@ -829,7 +829,7 @@ func parseCliArgs(exit func(int)) *cliParams {
 		"Git `branch` for the repository under test")
 	flag.StringVar(&params.testScript, "test-script", "",
 		"Command `path` to run on verified branch, relative to "+
-		"source-repo or absolute")
+			"source-repo or absolute")
 	flag.StringVar(&resultsRawUrl, "results-repo", "",
 		"Git `URL` to push test results to (required)")
 	// If the corresponding source branch is not pushed, then cloning the
@@ -893,7 +893,7 @@ func parseCliArgs(exit func(int)) *cliParams {
 }
 
 func main() {
-	params := parseCliArgs(func (exitCode int) {
+	params := parseCliArgs(func(exitCode int) {
 		os.Exit(exitCode)
 	})
 
