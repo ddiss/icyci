@@ -93,11 +93,11 @@ var states = map[State]stateDesc{
 const (
 	// notes refs are preceeded by a namespace, which defaults to:
 	defNotesNS    = "icyci"
-	lockNotes     = ".locked"
-	stdoutNotes   = ".output.stdout"
-	stderrNotes   = ".output.stderr"
-	passedNotes   = ".result.passed"
-	failedNotes   = ".result.failed"
+	lockNotes     = "locked"
+	stdoutNotes   = "output.stdout"
+	stderrNotes   = "output.stderr"
+	passedNotes   = "result.passed"
+	failedNotes   = "result.failed"
 	resultsRemote = "results"
 )
 
@@ -194,7 +194,7 @@ err_out:
 // lock to flags us as owner for testing this commit
 func pushLock(ch chan<- error, sourceDir string, branch string, notesNS string) {
 	var err error = nil
-	lockNotesRef := "refs/notes/" + notesNS + lockNotes
+	lockNotesRef := "refs/notes/" + notesNS + "." + lockNotes
 
 	for retries := 10; retries > 0; retries-- {
 
@@ -270,14 +270,14 @@ func startCommand(ch chan<- runCmdState, notesDir string, sourceDir string,
 		return
 	}
 
-	cmpl.stdoutP = path.Join(notesDir, "script.stdout")
+	cmpl.stdoutP = path.Join(notesDir, stdoutNotes)
 	cmpl.stdoutF, err = os.Create(cmpl.stdoutP)
 	if err != nil {
 		log.Printf("stdout log creation failed: %v", err)
 		goto err_out
 	}
 
-	cmpl.stderrP = path.Join(notesDir, "script.stderr")
+	cmpl.stderrP = path.Join(notesDir, stderrNotes)
 	cmpl.stderrF, err = os.Create(cmpl.stderrP)
 	if err != nil {
 		log.Printf("stderr log creation failed: %v", err)
@@ -361,18 +361,21 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, cmdPath string,
 	cmdState.stderrF.Sync()
 	cmdState.stderrF.Close()
 
-	// summary pushed as "passed" or "failed" note, depending on result
-	summaryP := path.Join(notesDir, "script.summary")
-	if cmdPath == "" {
-		msg = "No -test-script specified"
-	} else if cmdState.scriptStatus == nil {
-		msg = fmt.Sprintf("%s completed successfully", cmdPath)
+	var summaryP string
+	if cmdState.scriptStatus == nil {
+		if cmdPath == "" {
+			msg = "No -test-script specified"
+		} else {
+			msg = fmt.Sprintf("%s completed successfully", cmdPath)
+		}
+		summaryP = path.Join(notesDir, passedNotes)
 	} else {
-		stdoutNotesRef := "refs/notes/" + notesNS + stdoutNotes
-		stderrNotesRef := "refs/notes/" + notesNS + stderrNotes
+		stdoutNotesRef := "refs/notes/" + notesNS + "." + stdoutNotes
+		stderrNotesRef := "refs/notes/" + notesNS + "." + stderrNotes
 		msg = fmt.Sprintf("%s failed: %v\nSee %s and %s for details",
 			cmdPath, cmdState.scriptStatus,
 			stdoutNotesRef, stderrNotesRef)
+		summaryP = path.Join(notesDir, failedNotes)
 	}
 	log.Print(msg + "\n")
 	err = ioutil.WriteFile(summaryP, []byte(msg), os.FileMode(0644))
@@ -398,38 +401,28 @@ func pushResults(ch chan<- error, sourceDir string,
 	notesNS string, cmpl runCmdState) {
 
 	var err error = nil
-	type notesOut struct {
-		ns  string
-		msg string
-	}
-	var allNotes []notesOut
-	stdoutNotesRef := "refs/notes/" + notesNS + stdoutNotes
-	stderrNotesRef := "refs/notes/" + notesNS + stderrNotes
-	var notesRef string
+	// file name is appended to notesNS for the pushed note name
+	var allNotes []string
 
 	if cmpl.scriptStatus == nil {
-		notesRef = "refs/notes/" + notesNS + passedNotes
+		allNotes = append(allNotes, passedNotes)
 	} else {
-		notesRef = "refs/notes/" + notesNS + failedNotes
+		allNotes = append(allNotes, failedNotes)
 	}
 
-	allNotes = []notesOut{
-		{ns: notesRef, msg: path.Join(notesDir, "script.summary")},
-	}
 	if cmpl.stdoutP != "" {
-		note := notesOut{ns: stdoutNotesRef, msg: cmpl.stdoutP}
-		allNotes = append(allNotes, note)
+		allNotes = append(allNotes, stdoutNotes)
 	}
 	if cmpl.stderrP != "" {
-		note := notesOut{ns: stderrNotesRef, msg: cmpl.stderrP}
-		allNotes = append(allNotes, note)
+		allNotes = append(allNotes, stderrNotes)
 	}
 
 	gitFetchCmd := []string{"fetch", resultsRemote}
 	gitPushCmd := []string{"push", resultsRemote}
 	for _, note := range allNotes {
-		gitFetchCmd = append(gitFetchCmd, "+"+note.ns+":"+note.ns)
-		gitPushCmd = append(gitPushCmd, note.ns)
+		notesRef := "refs/notes/" + notesNS + "." + note
+		gitFetchCmd = append(gitFetchCmd, "+"+notesRef+":"+notesRef)
+		gitPushCmd = append(gitPushCmd, notesRef)
 	}
 	if pushSrcToRslts {
 		// force push because 'branch' we fetched previously
@@ -451,8 +444,10 @@ func pushResults(ch chan<- error, sourceDir string,
 		}
 
 		for _, note := range allNotes {
-			gitArgs := []string{"notes", "--ref", note.ns, "add",
-				"--allow-empty", "-F", note.msg,
+			notesRef := "refs/notes/" + notesNS + "." + note
+			gitArgs := []string{"notes", "--ref", notesRef, "add",
+				"--allow-empty", "-F",
+				path.Join(notesDir, note),
 				"origin/" + branch}
 			cmd := exec.Command("git", gitArgs...)
 			cmd.Dir = sourceDir

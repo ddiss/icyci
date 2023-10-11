@@ -27,11 +27,11 @@ const (
 	userName  = "icyCI test"
 	userEmail = "icyci@example.com"
 	// matches default ref path
-	lockNotesRef = "refs/notes/" + defNotesNS + lockNotes
-	stdoutNotesRef = "refs/notes/" + defNotesNS + stdoutNotes
-	stderrNotesRef = "refs/notes/" + defNotesNS + stderrNotes
-	passedNotesRef = "refs/notes/" + defNotesNS + passedNotes
-	failedNotesRef = "refs/notes/" + defNotesNS + failedNotes
+	lockNotesRef = "refs/notes/" + defNotesNS + "." + lockNotes
+	stdoutNotesRef = "refs/notes/" + defNotesNS + "." + stdoutNotes
+	stderrNotesRef = "refs/notes/" + defNotesNS + "." + stderrNotes
+	passedNotesRef = "refs/notes/" + defNotesNS + "." + passedNotes
+	failedNotesRef = "refs/notes/" + defNotesNS + "." + failedNotes
 )
 
 func gpgInit(t *testing.T, tdir string) {
@@ -1528,10 +1528,10 @@ func handleSpinlkSeparateNS(t *testing.T, sdir string, cloneDir string,
 		// sync - remote update can't be run concurrently in the
 		// same cloneDir. Must check instance specific NS
 		waitNotes(t, cloneDir,
-			"refs/notes/icyci-"+iThis.id+stdoutNotes,
+			"refs/notes/icyci-" + iThis.id + "." + stdoutNotes,
 			iThis.commit, iThis.notesChan)
 		waitNotes(t, cloneDir,
-			"refs/notes/icyci-"+iOther.id+stdoutNotes,
+			"refs/notes/icyci-" + iOther.id + "." + stdoutNotes,
 			iOther.commit, iOther.notesChan)
 	}()
 }
@@ -1689,7 +1689,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 	}
 	for _, i := range []*instanceState{&i1, &i2} {
 		checkResults(t, cloneDir, i.commit,
-			"refs/notes/icyci-"+i.id+passedNotes,
+			"refs/notes/icyci-" + i.id + "." + passedNotes,
 			i.params.testScript+" completed successfully")
 		i.evSigChan <- syscall.SIGTERM
 		i.wg.Wait()
