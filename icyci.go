@@ -400,29 +400,43 @@ func pushResults(ch chan<- error, sourceDir string,
 	branch string, tag string, pushSrcToRslts bool, notesDir string,
 	notesNS string, cmpl runCmdState) {
 
-	var err error = nil
-	// file name is appended to notesNS for the pushed note name
-	var allNotes []string
-
-	if cmpl.scriptStatus == nil {
-		allNotes = append(allNotes, passedNotes)
-	} else {
-		allNotes = append(allNotes, failedNotes)
-	}
-
-	if cmpl.stdoutP != "" {
-		allNotes = append(allNotes, stdoutNotes)
-	}
-	if cmpl.stderrP != "" {
-		allNotes = append(allNotes, stderrNotes)
-	}
-
 	gitFetchCmd := []string{"fetch", resultsRemote}
 	gitPushCmd := []string{"push", resultsRemote}
-	for _, note := range allNotes {
+	gitNotesAddCmds := [][]string{}
+	// file name is appended to notesNS for the pushed note name
+	allNotesFiles, err := os.ReadDir(notesDir)
+	if err != nil {
+		goto err_out
+	}
+
+	for i, dirEnt := range allNotesFiles {
+		note := dirEnt.Name()
+		// TOCTOA: notes add subsequently accesses file which might have
+		// changed type (e.g. to an evil symlink), so this is just
+		// informational rather than for safety. Tests should be run
+		// unprivileged and preferably sandboxed if untrusted.
+		if !dirEnt.Type().IsRegular() {
+			log.Printf("ignoring note %s: irregular type %v\n",
+				note, dirEnt.Type())
+			continue
+		}
+		if note == "lock" {
+			log.Printf("ignoring note %s: reserved name\n", note)
+			continue
+		}
+		if i > 1024 {
+			log.Printf("ignoring notes after 1024: excessive\n")
+			break
+		}
+		// TODO: might also be worth filtering out empty files
 		notesRef := "refs/notes/" + notesNS + "." + note
 		gitFetchCmd = append(gitFetchCmd, "+"+notesRef+":"+notesRef)
 		gitPushCmd = append(gitPushCmd, notesRef)
+
+		gitArgs := []string{"notes", "--ref", notesRef, "add",
+			"--allow-empty", "-F", path.Join(notesDir, note),
+			"origin/" + branch}
+		gitNotesAddCmds = append(gitNotesAddCmds, gitArgs)
 	}
 	if pushSrcToRslts {
 		// force push because 'branch' we fetched previously
@@ -443,12 +457,7 @@ func pushResults(ch chan<- error, sourceDir string,
 			log.Print("ignoring failure to fetch output git notes")
 		}
 
-		for _, note := range allNotes {
-			notesRef := "refs/notes/" + notesNS + "." + note
-			gitArgs := []string{"notes", "--ref", notesRef, "add",
-				"--allow-empty", "-F",
-				path.Join(notesDir, note),
-				"origin/" + branch}
+		for _, gitArgs := range gitNotesAddCmds {
 			cmd := exec.Command("git", gitArgs...)
 			cmd.Dir = sourceDir
 			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
