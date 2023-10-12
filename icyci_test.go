@@ -27,7 +27,7 @@ const (
 	userName  = "icyCI test"
 	userEmail = "icyci@example.com"
 	// matches default ref path
-	lockNotesRef = "refs/notes/" + defNotesNS + "." + lockNotes
+	lockNotesRef   = "refs/notes/" + defNotesNS + "." + lockNotes
 	stdoutNotesRef = "refs/notes/" + defNotesNS + "." + stdoutNotes
 	stderrNotesRef = "refs/notes/" + defNotesNS + "." + stderrNotes
 	passedNotesRef = "refs/notes/" + defNotesNS + "." + passedNotes
@@ -1689,7 +1689,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 	}
 	for _, i := range []*instanceState{&i1, &i2} {
 		checkResults(t, cloneDir, i.commit,
-			"refs/notes/icyci-" + i.id + "." + passedNotes,
+			"refs/notes/icyci-"+i.id+"."+passedNotes,
 			i.params.testScript+" completed successfully")
 		i.evSigChan <- syscall.SIGTERM
 		i.wg.Wait()
@@ -1705,7 +1705,7 @@ func TestStateTimeoutParam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if states[awaitCmd].timeout != time.Duration(3 * time.Second) {
+	if states[awaitCmd].timeout != time.Duration(3*time.Second) {
 		t.Fatal("unexpected timeout")
 	}
 
@@ -1713,7 +1713,7 @@ func TestStateTimeoutParam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if states[awaitCmd].timeout != time.Duration(3 * time.Hour) {
+	if states[awaitCmd].timeout != time.Duration(3*time.Hour) {
 		t.Fatal("unexpected timeout")
 	}
 
@@ -2020,7 +2020,7 @@ func TestMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commits := []string {fileWriteSignedCommit(t, sdir, "notrun.sh",
+	commits := []string{fileWriteSignedCommit(t, sdir, "notrun.sh",
 		`echo "this will not be run by icyci"`)}
 
 	surl, err := url.Parse(sdir)
@@ -2099,7 +2099,7 @@ func TestMirror(t *testing.T) {
 
 	// walk commit list to check for (un)expected notes
 	for i, c := range commits {
-		signed := (i & 1 == 0)
+		signed := (i&1 == 0)
 		cmd = exec.Command("git", "notes", "--ref="+lockNotesRef,
 			"show", "--", c)
 		cmd.Dir = rdir
@@ -2112,7 +2112,7 @@ func TestMirror(t *testing.T) {
 		}
 
 		// stdout/stderr notes should only be present with a testScript
-		for _, r := range []string{ stdoutNotesRef, stderrNotesRef } {
+		for _, r := range []string{stdoutNotesRef, stderrNotesRef} {
 			cmd = exec.Command("git", "notes", "--ref="+r,
 				"show", "--", c)
 			cmd.Dir = rdir
@@ -2126,19 +2126,19 @@ func TestMirror(t *testing.T) {
 }
 
 func TestCliArgs(t *testing.T) {
-	args := os.Args	// backup / restore for testing
+	args := os.Args // backup / restore for testing
 	defer func() {
 		os.Args = args
 	}()
 
-	os.Args = []string{ "icyci",
+	os.Args = []string{"icyci",
 		"--source-repo", "https://token:@example.com/source.git",
 		"--source-branch", "icyci-demo", "--test-script", "/test.sh",
 		"--results-repo", "https://token:@example.com/results.git",
 		"--source-reference", "/local/dir/linux.git",
 		"--push-source-to-results=false", "--poll-interval", "60",
 	}
-	params := parseCliArgs(func (exitCode int) {
+	params := parseCliArgs(func(exitCode int) {
 		t.Fatalf("unexpected exit request: %d", exitCode)
 	})
 
@@ -2176,7 +2176,7 @@ func TestCliArgs(t *testing.T) {
 
 	// https://github.com/ddiss/icyci/issues/4
 	// bogus --push-source-to-results bool setting
-	os.Args = []string{ "icyci",
+	os.Args = []string{"icyci",
 		"--source-repo", "https://token:@example.com/source.git",
 		"--source-branch", "icyci-demo", "--test-script", "/test.sh",
 		"--results-repo", "https://token:@example.com/results.git",
@@ -2186,7 +2186,7 @@ func TestCliArgs(t *testing.T) {
 	// reinit for another flag.Parse() call
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	var exitedCode *int
-	params = parseCliArgs(func (exitCode int) {
+	params = parseCliArgs(func(exitCode int) {
 		exitedCode = new(int)
 		*exitedCode = exitCode
 	})
@@ -2285,14 +2285,14 @@ func TestBadCmd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commits := []string {fileWriteSignedCommit(t, srdir, "notrun.sh",
+	commits := []string{fileWriteSignedCommit(t, srdir, "notrun.sh",
 		`echo "this will not be run by icyci"`)}
 
 	srurl, err := url.Parse(srdir)
 	params := cliParams{
 		sourceUrl:      srurl,
 		sourceBranch:   "mybranch",
-		testScript:     "./does_not_exist.sh",	// ENOENT
+		testScript:     "./does_not_exist.sh", // ENOENT
 		resultsUrl:     srurl,
 		pushSrcToRslts: true,
 		pollIntervalS:  1,
@@ -2344,4 +2344,89 @@ func TestBadCmd(t *testing.T) {
 		}
 	}
 	t.Logf("source committed: %v", commits)
+}
+
+func TestNotesDir(t *testing.T) {
+	var err error
+
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	srdir := path.Join(tdir, "test_src_and_rslt")
+	gitReposInit(t, tdir, srdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = srdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := fileWriteSignedCommit(t, srdir, "t.sh",
+		"echo hi_stdout; echo hi_extra > ${ICYCI_NOTES_DIR}/extra")
+
+	srurl, err := url.Parse(srdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := cliParams{
+		sourceUrl:      srurl,
+		sourceBranch:   "mybranch",
+		testScript:     "./t.sh",
+		resultsUrl:     srurl,
+		pushSrcToRslts: true,
+		pollIntervalS:  1,
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	notesChan := make(chan bytes.Buffer)
+	notesNum := 0
+	go func() {
+		waitNotes(t, srdir, "refs/notes/"+defNotesNS+"."+"extra",
+			c, notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for done := false; !done; {
+		var expected string
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			notesNum++
+			t.Logf("notes %d arrived\n", notesNum)
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if notesNum == 1 {
+				expected = "hi_extra"
+				go func() {
+					waitNotes(t, srdir, stdoutNotesRef,
+						c, notesChan)
+				}()
+			} else if notesNum == 2 {
+				expected = "hi_stdout"
+				evSigChan <- syscall.SIGTERM
+			}
+			if snotes != expected {
+				t.Fatalf("%s does not match expected %s\n",
+					snotes, expected)
+			}
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for notes or exit")
+		}
+	}
 }
