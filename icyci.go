@@ -288,7 +288,8 @@ func startCommand(ch chan<- runCmdState, notesDir string, sourceDir string,
 	go func() {
 		cmd = exec.Command(testScript)
 		cmd.Env = append(os.Environ(),
-			"ICYCI_PID="+strconv.Itoa(os.Getpid()))
+			"ICYCI_PID="+strconv.Itoa(os.Getpid()),
+			"ICYCI_NOTES_DIR="+notesDir)
 		cmd.Dir = sourceDir
 		cmd.Stdout = io.MultiWriter(os.Stdout, cmpl.stdoutF)
 		cmd.Stderr = io.MultiWriter(os.Stderr, cmpl.stderrF)
