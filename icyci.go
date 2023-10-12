@@ -403,38 +403,69 @@ func pushResults(ch chan<- error, sourceDir string,
 	gitFetchCmd := []string{"fetch", resultsRemote}
 	gitPushCmd := []string{"push", resultsRemote}
 	gitNotesAddCmds := [][]string{}
+	var allNotesFiles []string
 	// file name is appended to notesNS for the pushed note name
-	allNotesFiles, err := os.ReadDir(notesDir)
+	notesD, err := os.Open(notesDir)
+	if err != nil {
+		goto err_out
+	}
+	defer notesD.Close()
+
+	allNotesFiles, err = notesD.Readdirnames(1024)
 	if err != nil {
 		goto err_out
 	}
 
-	for i, dirEnt := range allNotesFiles {
-		note := dirEnt.Name()
-		// TOCTOA: notes add subsequently accesses file which might have
-		// changed type (e.g. to an evil symlink), so this is just
-		// informational rather than for safety. Tests should be run
-		// unprivileged and preferably sandboxed if untrusted.
-		if !dirEnt.Type().IsRegular() {
-			log.Printf("ignoring note %s: irregular type %v\n",
-				note, dirEnt.Type())
-			continue
-		}
+	if len(allNotesFiles) >= 1024 {
+		log.Print("Arbitrary notes file limit hit. Likely truncated\n")
+	}
+
+	for _, note := range allNotesFiles {
 		if note == "lock" {
 			log.Printf("ignoring note %s: reserved name\n", note)
 			continue
 		}
-		if i > 1024 {
-			log.Printf("ignoring notes after 1024: excessive\n")
-			break
+
+		f, err := os.OpenFile(path.Join(notesDir, note),
+			os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+		if err != nil {
+			log.Printf("ignoring note %s: %v\n", note, err)
+			continue
 		}
+		defer f.Close()
+
+		// regular files only. Should be TOCTOA safe if go uses the fd
+		info, err := f.Stat()
+		if err != nil {
+			log.Printf("ignoring note %s: %v\n", note, err)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			log.Printf("ignoring non-file %s\n", note)
+			continue
+		}
+
+		// slurp the file data as a binary-safe git object.
+		var hashOut bytes.Buffer
+		cmd := exec.Command("git", "hash-object", "-w", "--stdin",
+			"--no-filters")
+		cmd.Dir = sourceDir
+		cmd.Stdout, cmd.Stderr = &hashOut, os.Stderr
+		cmd.Stdin = f
+		err = cmd.Run()
+		if err != nil {
+			log.Printf("ignoring note %s: %v\n", note, err)
+			continue
+		}
+
 		// TODO: might also be worth filtering out empty files
 		notesRef := "refs/notes/" + notesNS + "." + note
 		gitFetchCmd = append(gitFetchCmd, "+"+notesRef+":"+notesRef)
 		gitPushCmd = append(gitPushCmd, notesRef)
 
 		gitArgs := []string{"notes", "--ref", notesRef, "add",
-			"--allow-empty", "-F", path.Join(notesDir, note),
+			"--allow-empty", "-C",
+			string(bytes.TrimRight(hashOut.Bytes(), "\n")),
 			"origin/" + branch}
 		gitNotesAddCmds = append(gitNotesAddCmds, gitArgs)
 	}
