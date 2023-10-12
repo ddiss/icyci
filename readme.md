@@ -87,6 +87,12 @@ The icyCI test results can be viewed alongside the regular git log output with:
 git log --show-notes="*"
 ```
 
+Extra build / test artifacts can be pushed to the *results-repo* as git notes
+by writing a file to the `ICYCI_NOTES_DIR` directory. E.g.
+```sh
+echo 'cp vmlinux ${ICYCI_NOTES_DIR}/built_kernel' >> ~/build-linux.sh
+```
+
 icyCI can be run as a systemd service. For details, see
 [docs/systemd-usage.md](docs/systemd-usage.md).
 
@@ -126,7 +132,6 @@ Future
 - Improve documentation
 - Support multiple branches within one instance
 - push results as static website, in addition to git-notes
-- Save and push build/test artifacts, in addition to output
 - Periodically push progress while testing
 - SSH key based git signature verification
 - Your feature; please raise requests via the issue tracker
