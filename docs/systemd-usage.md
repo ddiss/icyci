@@ -1,10 +1,11 @@
 icyCI can be configured to run as a systemd service.
 The procedure is as follows:
 
-1. Install the `icyci@.service` file into the systemd units path, e.g.
+1. Install the `system/icyci@.service` file into the systemd units path, e.g.
    `/etc/systemd/system/icyci@.service`.
-   * The service is configured to run as local user `icyci`. Modify
-     `icyci@.service` if a different user is desired.
+   * The service is configured to run as local user `icyci`. Use
+     `systemctl edit --drop-in=user icyci@.service` if a different user is
+     desired.
 
 2. Copy `icyci-instance.conf` under `/etc/icyci/`, using a name that identifies
    the Git repository that it tests, e.g.
@@ -26,3 +27,14 @@ The procedure is as follows:
    # systemctl enable icyci@linux-kernel-stable
    # systemctl start icyci@linux-kernel-stable
    ```
+
+## Running as a user service
+
+  ```
+  # mkdir -p $HOME/.config/systemd/user $HOME/.config/icyci
+  # ln -sr systemd/user/icyci@.service $HOME/.config/systemd/user/icyci@linux-kernel-stable.service
+  # cp systemd/icyci-instance.conf $HOME/.config/icyci/linux-kernel-stable.conf
+  # systemctl --user enable icyci@linux-kernel-stable.service
+  # loginctl enable-linger $USER
+  ```
+  * the last command applies only to remote machines without permanent login
