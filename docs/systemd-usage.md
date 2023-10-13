@@ -3,8 +3,9 @@ The procedure is as follows:
 
 1. Install the `system/icyci@.service` file into the systemd units path, e.g.
    `/etc/systemd/system/icyci@.service`.
-   * The service is configured to run as local user `icyci`. Modify
-     `icyci@.service` if a different user is desired.
+   * The service is configured to run as local user `icyci`. Use
+     `systemctl edit --drop-in=user icyci@.service` if a different user is
+     desired.
 
 2. Copy `icyci-instance.conf` under `/etc/icyci/`, using a name that identifies
    the Git repository that it tests, e.g.
