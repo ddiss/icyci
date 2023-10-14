@@ -2346,6 +2346,7 @@ func TestBadCmd(t *testing.T) {
 	t.Logf("source committed: %v", commits)
 }
 
+// confirm that notes place in $ICYCI_NOTES_DIR end up in results repo
 func TestNotesDir(t *testing.T) {
 	var err error
 
@@ -2413,6 +2414,107 @@ func TestNotesDir(t *testing.T) {
 				}()
 			} else if notesNum == 2 {
 				expected = "hi_stdout"
+				evSigChan <- syscall.SIGTERM
+			}
+			if snotes != expected {
+				t.Fatalf("%s does not match expected %s\n",
+					snotes, expected)
+			}
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for notes or exit")
+		}
+	}
+}
+
+// check that ICYCI_NOTES_DIR notes from previous commits aren't attached to
+// subsequent commits.
+func TestStaleNotesDir(t *testing.T) {
+	var err error
+
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	srdir := path.Join(tdir, "test_src_and_rslt")
+	gitReposInit(t, tdir, srdir)
+
+	cmd := exec.Command("git", "checkout", "-b", "mybranch")
+	cmd.Dir = srdir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := fileWriteSignedCommit(t, srdir, "t.sh",
+		"echo hi > ${ICYCI_NOTES_DIR}/extra_1")
+
+	srurl, err := url.Parse(srdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := cliParams{
+		sourceUrl:      srurl,
+		sourceBranch:   "mybranch",
+		testScript:     "./t.sh",
+		resultsUrl:     srurl,
+		pushSrcToRslts: true,
+		pollIntervalS:  1,
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	notesChan := make(chan bytes.Buffer)
+	notesNum := 0
+	notesRefPfx := "refs/notes/"+defNotesNS+"."
+	go func() {
+		waitNotes(t, srdir, notesRefPfx+"extra_1", c, notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for done := false; !done; {
+		var expected string
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			notesNum++
+			t.Logf("notes %d arrived\n", notesNum)
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if notesNum == 1 {
+				expected = "hi"
+				c = fileWriteSignedCommit(t, srdir, "t.sh",
+					"echo yo > ${ICYCI_NOTES_DIR}/extra_2")
+				go func() {
+					waitNotes(t, srdir, notesRefPfx+"extra_2",
+						c, notesChan)
+				}()
+			} else if notesNum == 2 {
+				// ensure previous notes aren't attached to new
+				// commit
+				cmd = exec.Command("git", "notes",
+					"--ref="+notesRefPfx+"extra_1", "show",
+					"--", c)
+				cmd.Dir = srdir
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				if err == nil {
+					t.Fatalf("stale extra_1 note at %s\n",
+						c)
+				}
+				expected = "yo"
 				evSigChan <- syscall.SIGTERM
 			}
 			if snotes != expected {
