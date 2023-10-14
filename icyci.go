@@ -265,6 +265,11 @@ func startCommand(ch chan<- runCmdState, notesDir string, sourceDir string,
 		goto err_out
 	}
 
+	err = os.MkdirAll(notesDir, 0700)
+	if err != nil {
+		log.Panic(err)
+	}
+
 	if testScript == "" {
 		ch <- cmpl
 		return
@@ -519,15 +524,18 @@ err_out:
 	ch <- err
 }
 
-func cleanupSource(ch chan<- error, sourceDir string) {
+func cleanupSource(ch chan<- error, sourceDir string, notesDir string) {
 	cmd := exec.Command("git", "clean", "--quiet", "--force", "-xd")
 	cmd.Dir = sourceDir
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	err := cmd.Run()
 	if err != nil {
-		log.Printf("git failed: %v", err)
+		log.Printf("git clean failed: %v", err)
 		goto err_out
 	}
+
+	// remove all notes files, including those skipped in pushResults()
+	err = os.RemoveAll(notesDir)
 err_out:
 	ch <- err
 }
@@ -661,11 +669,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 	// with the exception of the "lock", all notes content sent to the
 	// results repo is staged in notesDir
 	notesDir := path.Join(workDir, "notes")
-	err := os.MkdirAll(notesDir, 0700)
-	if err != nil {
-		log.Panic(err)
-	}
-
+	var err error
 	cmplChan := make(chan error)
 	verifyChan := make(chan verifyCompletion)
 	runCmdChan := make(chan runCmdState)
@@ -724,7 +728,8 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 			case push:
 				transitionState(cleanup, &ls)
 				go func() {
-					cleanupSource(cmplChan, sourceDir)
+					cleanupSource(cmplChan, sourceDir,
+						notesDir)
 				}()
 			case cleanup:
 				transitionState(poll, &ls)
