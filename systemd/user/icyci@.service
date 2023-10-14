@@ -3,7 +3,7 @@ Description=icyCI
 
 [Service]
 EnvironmentFile=%h/.config/icyci/%i.conf
-ExecStart=%h/icyci/icyci --source-repo=${SOURCE_REPO} --source-branch=${SOURCE_BRANCH} --test-script=${TEST_SCRIPT} --results-repo=${RESULTS_REPO} --push-source-to-results=${PUSH_SOURCE_TO_RESULTS} --poll-interval=${POLL_INTERVAL} $EXTRA_PARAMS
+ExecStart=%h/icyci/icyci -source-repo=${SOURCE_REPO} -source-branch=${SOURCE_BRANCH} -test-script=${TEST_SCRIPT} -results-repo=${RESULTS_REPO} -push-source-to-results=${PUSH_SOURCE_TO_RESULTS} -poll-interval=${POLL_INTERVAL} $EXTRA_PARAMS
 KillMode=mixed
 Restart=on-failure
 RestartSec=30s
