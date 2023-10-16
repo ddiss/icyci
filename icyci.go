@@ -244,9 +244,7 @@ err_out:
 type runCmdState struct {
 	pgid         int
 	cmdWaitChan  chan error
-	stdoutP      string
 	stdoutF      *os.File
-	stderrP      string
 	stderrF      *os.File
 	scriptStatus error
 	err          error
@@ -275,15 +273,13 @@ func startCommand(ch chan<- runCmdState, notesDir string, sourceDir string,
 		return
 	}
 
-	cmpl.stdoutP = path.Join(notesDir, stdoutNotes)
-	cmpl.stdoutF, err = os.Create(cmpl.stdoutP)
+	cmpl.stdoutF, err = os.Create(path.Join(notesDir, stdoutNotes))
 	if err != nil {
 		log.Printf("stdout log creation failed: %v", err)
 		goto err_out
 	}
 
-	cmpl.stderrP = path.Join(notesDir, stderrNotes)
-	cmpl.stderrF, err = os.Create(cmpl.stderrP)
+	cmpl.stderrF, err = os.Create(path.Join(notesDir, stderrNotes))
 	if err != nil {
 		log.Printf("stderr log creation failed: %v", err)
 		goto err_stdout_close
@@ -324,9 +320,7 @@ err_stdout_close:
 err_out:
 	ch <- runCmdState{
 		cmdWaitChan:  nil,
-		stdoutP:      "",
 		stdoutF:      nil,
-		stderrP:      "",
 		stderrF:      nil,
 		scriptStatus: nil,
 		err:          err}
@@ -393,9 +387,7 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, cmdPath string,
 	return
 err_out:
 	ch <- runCmdState{
-		stdoutP:      "",
 		stdoutF:      nil,
-		stderrP:      "",
 		stderrF:      nil,
 		scriptStatus: err,
 		err:          err}
