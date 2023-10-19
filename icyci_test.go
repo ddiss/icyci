@@ -1041,15 +1041,14 @@ func checkResults(t *testing.T, repoDir string, commit string, notesRef string,
 	t.Logf("%s matches expected: %s", notesRef, snotes)
 }
 
-// - test multiple concurrent icyCI instances running against the same source
+// test multiple concurrent icyCI instances running against the same source:
 // - instances use "spinlk" files for synchronisation during testing
 // - commit changes and start both (i1 and i2) instances
 // - one instance picks up the new commit and runs its testScript
 // - the other instance remains in the icyci git fetch loop
 // - testScript creates a spinlk file and waits for its removal
 // - waitSpinlk() detects the instance blocked by spinlk
-// - commit another change, to be picked up by the other instance in the git
-//   fetch loop
+// - commit another change, to be picked up by the other instance's fetch loop
 // - wait for the second spinlk file to appear
 // - remove both spinlk files and wait for notes
 func TestMultiInstance(t *testing.T) {
@@ -1528,16 +1527,16 @@ func handleSpinlkSeparateNS(t *testing.T, sdir string, cloneDir string,
 		// sync - remote update can't be run concurrently in the
 		// same cloneDir. Must check instance specific NS
 		waitNotes(t, cloneDir,
-			"refs/notes/icyci-" + iThis.id + "." + stdoutNotes,
+			"refs/notes/icyci-"+iThis.id+"."+stdoutNotes,
 			iThis.commit, iThis.notesChan)
 		waitNotes(t, cloneDir,
-			"refs/notes/icyci-" + iOther.id + "." + stdoutNotes,
+			"refs/notes/icyci-"+iOther.id+"."+stdoutNotes,
 			iOther.commit, iOther.notesChan)
 	}()
 }
 
-// - multiple concurrent icyCI instances running against the same source, but
-//   using separate namespaces, so jobs should run independent of each other.
+// multiple concurrent icyCI instances running against the same source, but
+// using separate namespaces, so jobs should run independent of each other:
 // - commit changes and start both (i1 and i2) instances
 // - wait for both "spinlk" files to be created by the test scripts
 // - remove the "spinlk" files to allow the test scripts to complete
@@ -1844,7 +1843,7 @@ func TestScriptExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// continuous recreation of spinlk file is used to 
+	// touch spinlk file in loop. lack of recreation used to confirm exit.
 	spinlk := path.Join(tdir, "spinlk")
 	fileWriteSignedCommit(t, sdir, "src_test.sh",
 		"while true; do touch "+spinlk+"; fsync "+spinlk+"; sleep 0.5; done")
@@ -2477,7 +2476,7 @@ func TestStaleNotesDir(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	notesNum := 0
-	notesRefPfx := "refs/notes/"+defNotesNS+"."
+	notesRefPfx := "refs/notes/" + defNotesNS + "."
 	go func() {
 		waitNotes(t, srdir, notesRefPfx+"extra_1", c, notesChan)
 	}()
