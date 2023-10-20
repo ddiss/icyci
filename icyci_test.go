@@ -82,6 +82,16 @@ func gpgInit(t *testing.T, tdir string) {
 	t.Logf("created GPG keypair at %s with key id %s", gpgDir, userEmail)
 }
 
+func gitCmd(t *testing.T, dir string, args ...string) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func gitReposInit(t *testing.T, gitHomeDir string, repoDirs ...string) {
 
 	gitCfg := path.Join(gitHomeDir, ".gitconfig")
@@ -103,12 +113,7 @@ func gitReposInit(t *testing.T, gitHomeDir string, repoDirs ...string) {
 			continue
 		}
 		dupFilter[dir] = true
-		cmd := exec.Command("git", "init", dir)
-		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		err := cmd.Run()
-		if err != nil {
-			t.Fatal(err)
-		}
+		gitCmd(t, gitHomeDir, "init", dir)
 	}
 }
 
@@ -123,13 +128,7 @@ func fileWriteCommit(t *testing.T, sdir string, sfiles map[string]string,
 			t.Fatal(err)
 		}
 
-		cmd := exec.Command("git", "add", srcPath)
-		cmd.Dir = sdir
-		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		err = cmd.Run()
-		if err != nil {
-			t.Fatal(err)
-		}
+		gitCmd(t, sdir, "add", srcPath)
 	}
 
 	gitCmd := append([]string{"commit"}, gitCommitParams...)
@@ -210,28 +209,19 @@ func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
 // - test script is in the source repo
 // - single icyCI instance trusting only one key
 func TestSeparateSrcRslt(t *testing.T) {
-	var err error
-
 	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src")
 	rdir := path.Join(tdir, "test_rslt")
 	gitReposInit(t, tdir, sdir, rdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "this has been run by icyci"`)
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -252,30 +242,9 @@ func TestSeparateSrcRslt(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd = exec.Command("git", "remote", "add", "results", rdir)
-	cmd.Dir = cloneDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd = exec.Command("git", "config", "--add", "remote.results.fetch",
-		"refs/notes/*:refs/notes/*")
-	cmd.Dir = cloneDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", sdir, cloneDir)
+	gitCmd(t, cloneDir, "remote", "add", "results", rdir)
+	gitCmd(t, cloneDir, "config", "--add", "remote.results.fetch", "refs/notes/*:refs/notes/*")
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -310,7 +279,6 @@ func TestSeparateSrcRslt(t *testing.T) {
 // - wait for new head to be tested successfully
 // - loop over last two items "maxCommitI" times
 func TestNewHeadSameSrcRslt(t *testing.T) {
-	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
@@ -323,21 +291,14 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -358,14 +319,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -411,7 +365,6 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 // - move source head forward
 // - start new instance
 func TestNewHeadWhileStopped(t *testing.T) {
-	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
@@ -424,21 +377,14 @@ func TestNewHeadWhileStopped(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -460,14 +406,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -556,7 +495,6 @@ func (lp *logParser) Write(p []byte) (int, error) {
 // - check for lock failure by scraping logs
 // - move forward head and ensure new commit is tested
 func TestStopStart(t *testing.T) {
-	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
@@ -569,21 +507,14 @@ func TestStopStart(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -605,14 +536,7 @@ func TestStopStart(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -686,7 +610,6 @@ func TestStopStart(t *testing.T) {
 // FIXME icyci currently only polls for heads, so the signed tag needs to be
 // pushed before the new head
 func TestSignedTagUnsignedCommit(t *testing.T) {
-	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var commitI int = 0
@@ -702,46 +625,19 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 
 	// commit from clone so that we can push the tag before the new head
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd := exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd = exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = cloneDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	gitCmd(t, cloneDir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteUnsignedCommit(t, cloneDir, "src_test.sh",
 		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
 	tagName := "mytag" + strconv.Itoa(commitI)
-	cmd = exec.Command("git", "tag", "-s", "-m", "signed tag", tagName)
-	cmd.Dir = cloneDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, cloneDir, "tag", "-s", "-m", "signed tag", tagName)
+	gitCmd(t, cloneDir, "push", sdir, tagName, "mybranch:mybranch")
 
-	cmd = exec.Command("git", "push", sdir, tagName, "mybranch:mybranch")
-	cmd.Dir = cloneDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -786,23 +682,8 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 			commitI++
 
 			tagName = "mytag" + strconv.Itoa(commitI)
-			cmd = exec.Command("git", "tag", "-s",
-				"-m", "signed tag", tagName)
-			cmd.Dir = cloneDir
-			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-			err = cmd.Run()
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			cmd = exec.Command("git", "push", sdir, tagName,
-				"mybranch:mybranch")
-			cmd.Dir = cloneDir
-			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-			err = cmd.Run()
-			if err != nil {
-				t.Fatal(err)
-			}
+			gitCmd(t, cloneDir, "tag", "-s", "-m", "signed tag", tagName)
+			gitCmd(t, cloneDir, "push", sdir, tagName, "mybranch:mybranch")
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
 					curCommit, notesChan)
@@ -820,7 +701,6 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 
 // - first commit is signed, then alternate between signed and unsigned
 func TestMixUnsignedSigned(t *testing.T) {
-	var err error
 	var commitI int = 0
 	var curCommit string
 	const maxCommitI int = 4
@@ -831,21 +711,14 @@ func TestMixUnsignedSigned(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
 	commitI++
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -867,14 +740,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -1052,7 +918,6 @@ func checkResults(t *testing.T, repoDir string, commit string, notesRef string,
 // - wait for the second spinlk file to appear
 // - remove both spinlk files and wait for notes
 func TestMultiInstance(t *testing.T) {
-	var err error
 	cs := commitState{
 		nextCommitI: 0,
 		m:           make(map[int]string),
@@ -1064,14 +929,7 @@ func TestMultiInstance(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	surl, err := url.Parse(sdir)
 	if err != nil {
@@ -1134,14 +992,7 @@ func TestMultiInstance(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for either instance to create their spinlk file, which
 	// signifies that they've won the race to obtain the icyci lock.
@@ -1208,7 +1059,6 @@ func TestMultiInstance(t *testing.T) {
 
 // - check that ICYCI_X env variables are set within script
 func TestScriptEnv(t *testing.T) {
-	var err error
 	// commitI tracks the number of commits for which we should expect a
 	// corresponding results note entry.
 	var curCommit string
@@ -1219,19 +1069,12 @@ func TestScriptEnv(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "ICYCI_PID: $ICYCI_PID"`)
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -1252,14 +1095,7 @@ func TestScriptEnv(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -1289,7 +1125,6 @@ func TestScriptEnv(t *testing.T) {
 
 // - check that SIGUSR1 is processed
 func TestScriptSignalLog(t *testing.T) {
-	var err error
 	grepChan := make(chan bool)
 
 	tdir := t.TempDir()
@@ -1298,19 +1133,12 @@ func TestScriptSignalLog(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	_ = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`kill -SIGUSR1 "$ICYCI_PID"; sleep 1`)
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -1365,7 +1193,6 @@ func TestScriptSignalLog(t *testing.T) {
 // - expect results to also be forced
 // - single icyCI instance trusting only one key
 func TestForcePushSrc(t *testing.T) {
-	var err error
 	var commits = []string{}
 	const maxCommitI int = 4
 
@@ -1375,21 +1202,14 @@ func TestForcePushSrc(t *testing.T) {
 	sdir := path.Join(tdir, "test_src")
 	rdir := path.Join(tdir, "test_rslt")
 	gitReposInit(t, tdir, sdir, rdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit := fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "commitI: `+strconv.Itoa(len(commits))+`"`)
 	commits = append(commits, curCommit)
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -1410,30 +1230,9 @@ func TestForcePushSrc(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd = exec.Command("git", "remote", "add", "results", rdir)
-	cmd.Dir = cloneDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd = exec.Command("git", "config", "--add", "remote.results.fetch",
-		"refs/notes/*:refs/notes/*")
-	cmd.Dir = cloneDir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", sdir, cloneDir)
+	gitCmd(t, cloneDir, "remote", "add", "results", rdir)
+	gitCmd(t, cloneDir, "config", "--add", "remote.results.fetch", "refs/notes/*:refs/notes/*")
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -1478,18 +1277,12 @@ event_loop:
 
 	// git gc --prune=now in results repo to see which objects get dropped,
 	// if any.
-	cmd = exec.Command("git", "gc", "--prune=now")
-	cmd.Dir = rdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, rdir, "gc", "--prune=now")
 	for _, i := range commits {
-		cmd = exec.Command("git", "notes", "--ref="+stdoutNotesRef, "show",
+		cmd := exec.Command("git", "notes", "--ref="+stdoutNotesRef, "show",
 			"--", i)
 		cmd.Dir = rdir
-		err = cmd.Run()
+		err := cmd.Run()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1542,7 +1335,6 @@ func handleSpinlkSeparateNS(t *testing.T, sdir string, cloneDir string,
 // - remove the "spinlk" files to allow the test scripts to complete
 // - wait for result notes to arrive and validate content
 func TestMultiInstanceSeparateNS(t *testing.T) {
-	var err error
 	cs := commitState{
 		nextCommitI: 0,
 		m:           make(map[int]string),
@@ -1554,14 +1346,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	surl, err := url.Parse(sdir)
 	if err != nil {
@@ -1623,14 +1408,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for either instance to create their spinlk file, which
 	// signifies that they've won the race to obtain the icyci lock.
@@ -1740,7 +1518,6 @@ func TestStateTimeoutParam(t *testing.T) {
 
 // check that script timeout results in regular failure path
 func TestScriptTimeout(t *testing.T) {
-	var err error
 	var curCommit string
 	// revert to previous timeouts after test
 	states_before_timeout_changes := states
@@ -1752,24 +1529,18 @@ func TestScriptTimeout(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		"sleep 1 && echo DONE")
 
-	err = parseStateTimeout("await-command:500ms")
+	err := parseStateTimeout("await-command:500ms")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -1790,14 +1561,7 @@ func TestScriptTimeout(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
 
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
@@ -1826,7 +1590,6 @@ func TestScriptTimeout(t *testing.T) {
 
 // exit while test-script is running and confirm that it stops
 func TestScriptExit(t *testing.T) {
-	var err error
 	spinlkChan := make(chan bool)
 
 	tdir := t.TempDir()
@@ -1835,14 +1598,7 @@ func TestScriptExit(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	// touch spinlk file in loop. lack of recreation used to confirm exit.
 	spinlk := path.Join(tdir, "spinlk")
 	fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -1852,8 +1608,8 @@ func TestScriptExit(t *testing.T) {
 		waitSpinlk(t, spinlk, spinlkChan)
 	}()
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -1904,42 +1660,27 @@ func TestScriptExit(t *testing.T) {
 
 // check that source-reference (git clone --reference) behaviour works
 func TestSrcReference(t *testing.T) {
-	var err error
-
 	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rsltsDir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	// first commit is common between source and ref repos, following clone
 	fileWriteSignedCommit(t, sdir, "src_test.sh", "echo this-is-also-in-ref")
 
 	srefDir := path.Join(tdir, "src_reference_repo")
-	cmd = exec.Command("git", "clone", sdir, srefDir)
-	cmd.Dir = tdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", sdir, srefDir)
 
 	// second commit is only in source repo
 	curCommit := fileWriteSignedCommit(t, sdir, "src_test.sh",
 		"echo only-in-src")
 
-	surl, err := url.Parse(sdir)
-	rsltsUrl, err := url.Parse(rsltsDir)
-	srefUrl, err := url.Parse(srefDir)
+	surl, _ := url.Parse(sdir)
+	rsltsUrl, _ := url.Parse(rsltsDir)
+	srefUrl, _ := url.Parse(srefDir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceRefUrl:   srefUrl,
@@ -1960,13 +1701,7 @@ func TestSrcReference(t *testing.T) {
 
 	// clone source and add results repo as a remote
 	cloneDir := path.Join(tdir, "test_clone_both")
-	cmd = exec.Command("git", "clone", "--config",
-		"remote.origin.fetch=refs/notes/*:refs/notes/*", rsltsDir, cloneDir)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, tdir, "clone", "--config", "remote.origin.fetch=refs/notes/*:refs/notes/*", rsltsDir, cloneDir)
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
@@ -2002,28 +1737,19 @@ func TestSrcReference(t *testing.T) {
 // flip-flap between signed and unsigned commits, confirming that only signed
 // commits trigger mirroring.
 func TestMirror(t *testing.T) {
-	var err error
-
 	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	sdir := path.Join(tdir, "test_src")
 	rdir := path.Join(tdir, "test_rslt")
 	gitReposInit(t, tdir, sdir, rdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	commits := []string{fileWriteSignedCommit(t, sdir, "notrun.sh",
 		`echo "this will not be run by icyci"`)}
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	// testScript left empty for mirroring
 	params := cliParams{
 		sourceUrl:      surl,
@@ -2099,11 +1825,11 @@ func TestMirror(t *testing.T) {
 	// walk commit list to check for (un)expected notes
 	for i, c := range commits {
 		signed := (i&1 == 0)
-		cmd = exec.Command("git", "notes", "--ref="+lockNotesRef,
+		cmd := exec.Command("git", "notes", "--ref="+lockNotesRef,
 			"show", "--", c)
 		cmd.Dir = rdir
 		cmd.Stdout = os.Stdout
-		err = cmd.Run()
+		err := cmd.Run()
 		if signed && err != nil {
 			t.Fatalf("lock missing on %s\n", c)
 		} else if !signed && err == nil {
@@ -2195,7 +1921,6 @@ func TestCliArgs(t *testing.T) {
 }
 
 func TestScriptSigterm(t *testing.T) {
-	var err error
 	grepChan := make(chan bool)
 
 	tdir := t.TempDir()
@@ -2204,20 +1929,13 @@ func TestScriptSigterm(t *testing.T) {
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
 	gitReposInit(t, tdir, sdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	// long sleep used to confirm that SIGTERM results in cmd termination
 	_ = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`kill -SIGTERM "$ICYCI_PID"; sleep 100`)
 
-	surl, err := url.Parse(sdir)
-	rurl, err := url.Parse(rdir)
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
 	params := cliParams{
 		sourceUrl:      surl,
 		sourceBranch:   "mybranch",
@@ -2268,26 +1986,17 @@ func TestScriptSigterm(t *testing.T) {
 }
 
 func TestBadCmd(t *testing.T) {
-	var err error
-
 	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	srdir := path.Join(tdir, "test_src_and_rslt")
 	gitReposInit(t, tdir, srdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = srdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, srdir, "checkout", "-b", "mybranch")
 
 	commits := []string{fileWriteSignedCommit(t, srdir, "notrun.sh",
 		`echo "this will not be run by icyci"`)}
 
-	srurl, err := url.Parse(srdir)
+	srurl, _ := url.Parse(srdir)
 	params := cliParams{
 		sourceUrl:      srurl,
 		sourceBranch:   "mybranch",
@@ -2347,21 +2056,12 @@ func TestBadCmd(t *testing.T) {
 
 // confirm that notes place in $ICYCI_NOTES_DIR end up in results repo
 func TestNotesDir(t *testing.T) {
-	var err error
-
 	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	srdir := path.Join(tdir, "test_src_and_rslt")
 	gitReposInit(t, tdir, srdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = srdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, srdir, "checkout", "-b", "mybranch")
 
 	c := fileWriteSignedCommit(t, srdir, "t.sh",
 		"echo hi_stdout; echo hi_extra > ${ICYCI_NOTES_DIR}/extra")
@@ -2434,21 +2134,12 @@ func TestNotesDir(t *testing.T) {
 // check that ICYCI_NOTES_DIR notes from previous commits aren't attached to
 // subsequent commits.
 func TestStaleNotesDir(t *testing.T) {
-	var err error
-
 	tdir := t.TempDir()
 	gpgInit(t, tdir)
 
 	srdir := path.Join(tdir, "test_src_and_rslt")
 	gitReposInit(t, tdir, srdir)
-
-	cmd := exec.Command("git", "checkout", "-b", "mybranch")
-	cmd.Dir = srdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitCmd(t, srdir, "checkout", "-b", "mybranch")
 
 	c := fileWriteSignedCommit(t, srdir, "t.sh",
 		"echo hi > ${ICYCI_NOTES_DIR}/extra_1")
@@ -2503,7 +2194,7 @@ func TestStaleNotesDir(t *testing.T) {
 			} else if notesNum == 2 {
 				// ensure previous notes aren't attached to new
 				// commit
-				cmd = exec.Command("git", "notes",
+				cmd := exec.Command("git", "notes",
 					"--ref="+notesRefPfx+"extra_1", "show",
 					"--", c)
 				cmd.Dir = srdir
