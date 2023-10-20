@@ -2222,3 +2222,147 @@ func TestStaleNotesDir(t *testing.T) {
 		}
 	}
 }
+
+// check that signed merge commits also trigger testScript
+// - create unsigned commits in mergesrc and mergedst branches
+// - merge mergesrc into mergedst with commit signature
+func TestSignedMerge(t *testing.T) {
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir)
+	gitCmd(t, sdir, "checkout", "-b", "mergedst")
+
+	fileWriteUnsignedCommit(t, sdir, "test.sh",
+		"echo -n flag check:; [ -f merged.flag ] && echo merged")
+
+	gitCmd(t, sdir, "checkout", "-b", "mergesrc")
+
+	fileWriteUnsignedCommit(t, sdir, "merged.flag", "")
+
+	gitCmd(t, sdir, "checkout", "mergedst")
+	gitCmd(t, sdir, "merge", "--gpg-sign", "--no-ff", "-m", "signed merge commit", "mergesrc")
+
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mergedst",
+		testScript:     "./test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, sdir, stdoutNotesRef, "HEAD", notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case notes := <-notesChan:
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "flag check:merged" {
+				t.Fatalf("unexpected notes content: %s\n",
+					snotes)
+			}
+			evSigChan <- syscall.SIGTERM
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			return
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting signed merge notes\n")
+		}
+	}
+}
+
+// Check that an unsigned merge from a signed tag doesn't pass verification
+// - create unsigned commits in mergesrc and mergedst branches
+// - tag --sign mergesrc
+// - merge signed tag into mergedst without commit signature
+// - git retains & verifies mergetag sigs, but they shouldn't pass icyci verify
+func TestMergeSignedTag(t *testing.T) {
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	rdir := sdir
+	gitReposInit(t, tdir, sdir)
+	gitCmd(t, sdir, "checkout", "-b", "mergedst")
+
+	fileWriteUnsignedCommit(t, sdir, "test.sh",
+		"echo -n flag check:; [ -f merged.flag ] && echo merged")
+
+	gitCmd(t, sdir, "checkout", "-b", "mergesrc")
+
+	fileWriteUnsignedCommit(t, sdir, "merged.flag", "")
+
+	gitCmd(t, sdir, "tag", "-s", "-m", "signed tag", "mergesrctag")
+	gitCmd(t, sdir, "checkout", "mergedst")
+	gitCmd(t, sdir, "merge", "--no-ff", "-m", "merge commit", "mergesrctag")
+
+	surl, _ := url.Parse(sdir)
+	rurl, _ := url.Parse(rdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mergedst",
+		testScript:     "./test.sh",
+		resultsUrl:     rurl,
+		pushSrcToRslts: false,
+		pollIntervalS:  1, // minimal
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	grepChan := make(chan bool)
+	lp := logParser{
+		T:      t,
+		needle: []byte("GPG verification of commit at origin/mergedst failed"),
+		ch:     grepChan,
+	}
+	log.SetOutput(&lp)
+
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, sdir, stdoutNotesRef, "HEAD", notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case <-grepChan:
+			log.SetOutput(os.Stderr)
+			t.Logf("log grep successful")
+			evSigChan <- syscall.SIGTERM
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			return
+		case <-waitTimer.C:
+			t.Fatal("timeout waiting for verification failure\n")
+		}
+	}
+}
