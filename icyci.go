@@ -47,7 +47,7 @@ type cliParams struct {
 	testScript      string
 	resultsUrl      *url.URL
 	pushSrcToRslts  bool
-	pollIntervalS   uint64
+	pollInterval    time.Duration
 	disableTimeouts bool
 	notesNS         string
 }
@@ -565,8 +565,8 @@ err_out:
 	return err
 }
 
-func pollSource(retCh chan<- error, exitCh chan error, sourceDir string, branch string,
-	pollIntervalS uint64) {
+func pollSource(retCh chan<- error, exitCh chan error, sourceDir string,
+	branch string, pollInterval time.Duration) {
 
 	var err error = nil
 	var pollTimer *time.Timer
@@ -581,7 +581,7 @@ func pollSource(retCh chan<- error, exitCh chan error, sourceDir string, branch 
 	log.Printf("Entering poll loop awaiting new %s commits at %s\n",
 		branch, preFetchRev)
 
-	pollTimer = time.NewTimer(time.Second * time.Duration(pollIntervalS))
+	pollTimer = time.NewTimer(pollInterval)
 	for {
 		select {
 		case err = <-exitCh:
@@ -589,7 +589,7 @@ func pollSource(retCh chan<- error, exitCh chan error, sourceDir string, branch 
 			goto err_out
 
 		case <-pollTimer.C:
-			pollTimer.Reset(time.Second * time.Duration(pollIntervalS))
+			pollTimer.Reset(time.Second * time.Duration(pollInterval))
 
 			err = pollFetch(sourceDir, branch)
 			if err != nil {
@@ -689,7 +689,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 							childExitChan,
 							sourceDir,
 							params.sourceBranch,
-							params.pollIntervalS)
+							params.pollInterval)
 					}()
 					continue
 				}
@@ -729,7 +729,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 					pollSource(cmplChan, childExitChan,
 						sourceDir,
 						params.sourceBranch,
-						params.pollIntervalS)
+						params.pollInterval)
 				}()
 			case poll:
 				transitionState(verify, &ls)
@@ -749,7 +749,7 @@ func eventLoop(params *cliParams, workDir string, evSigChan chan os.Signal) {
 					pollSource(cmplChan, childExitChan,
 						sourceDir,
 						params.sourceBranch,
-						params.pollIntervalS)
+						params.pollInterval)
 				}()
 				continue
 			}
@@ -855,6 +855,7 @@ func parseCliArgs(exit func(int)) *cliParams {
 	var err error
 
 	params := new(cliParams)
+	params.pollInterval = time.Duration(60 * time.Second)
 	flag.Usage = usage
 	flag.StringVar(&srcRawUrl, "source-repo", "",
 		"Git `URL` for the repository under test (required)")
@@ -870,9 +871,28 @@ func parseCliArgs(exit func(int)) *cliParams {
 	// confusion due to the missing commits referenced by the notes.
 	flag.BoolVar(&params.pushSrcToRslts, "push-source-to-results", true,
 		"Push source-branch and any tag to results-repo, in addition to notes")
-	// TODO should support time.ParseDuration() suffixes, e.g. 1h?
-	flag.Uint64Var(&params.pollIntervalS, "poll-interval", 60,
-		"While idle, poll source-repo for changes at this `seconds` interval")
+	flag.Func("poll-interval",
+		"While idle, poll source-repo for changes at every `duration` "+
+			"(s)econds. (m)inute or (h)our units are also valid, "+
+			"e.g. 1h30m",
+		func(s string) error {
+			// if no suffix then assume seconds for backwards compat
+			if _, err = strconv.ParseUint(s, 10, 64); err == nil {
+				s += "s"
+			}
+			params.pollInterval, err = time.ParseDuration(s)
+			if err != nil {
+				log.Printf("invalid poll-interval \"%s\": %v\n",
+					s, err)
+				exit(1)
+			}
+			if params.pollInterval <= 0 {
+				// TODO: run as single shot if interval is 0
+				err = errors.New("negative or zero poll-interval")
+				exit(1)
+			}
+			return err
+		})
 	flag.BoolVar(&printVers, "v", false, "print version and then exit")
 	flag.BoolVar(&params.disableTimeouts, "disable-timeouts", false,
 		"Disable timeouts for states transitions")

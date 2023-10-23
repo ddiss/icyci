@@ -228,7 +228,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  60,
+		pollInterval:   time.Duration(time.Minute),
 		notesNS:        defNotesNS,
 	}
 
@@ -305,7 +305,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -391,7 +391,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -521,7 +521,7 @@ func TestStopStart(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -644,7 +644,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -725,7 +725,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -958,7 +958,7 @@ func TestMultiInstance(t *testing.T) {
 			testScript:     "./" + i.id + "_test.sh",
 			resultsUrl:     rurl,
 			pushSrcToRslts: false,
-			pollIntervalS:  1,
+			pollInterval:   time.Duration(time.Second),
 			notesNS:        defNotesNS,
 		}
 
@@ -1081,7 +1081,7 @@ func TestScriptEnv(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -1145,7 +1145,7 @@ func TestScriptSignalLog(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -1216,7 +1216,7 @@ func TestForcePushSrc(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: true,
-		pollIntervalS:  1,
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -1374,7 +1374,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 			testScript:     "./" + i.id + "_test.sh",
 			resultsUrl:     rurl,
 			pushSrcToRslts: false,
-			pollIntervalS:  1,
+			pollInterval:   time.Duration(time.Second),
 			notesNS:        "icyci-" + i.id,
 		}
 
@@ -1547,7 +1547,7 @@ func TestScriptTimeout(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -1616,7 +1616,7 @@ func TestScriptExit(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1,
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -1688,7 +1688,7 @@ func TestSrcReference(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rsltsUrl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1,
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -1756,7 +1756,7 @@ func TestMirror(t *testing.T) {
 		sourceBranch:   "mybranch",
 		resultsUrl:     rurl,
 		pushSrcToRslts: true,
-		pollIntervalS:  1,
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -1895,8 +1895,9 @@ func TestCliArgs(t *testing.T) {
 			params.pushSrcToRslts)
 	}
 
-	if params.pollIntervalS != 60 {
-		t.Fatalf("unexpected pollIntervalS %d\n", params.pollIntervalS)
+	// poll-interval without units defaults to seconds
+	if params.pollInterval != time.Duration(60*time.Second) {
+		t.Fatalf("unexpected pollInterval %v\n", params.pollInterval)
 	}
 
 	// https://github.com/ddiss/icyci/issues/4
@@ -1909,14 +1910,76 @@ func TestCliArgs(t *testing.T) {
 		"--push-source-to-results", "true", "--poll-interval", "60",
 	}
 	// reinit for another flag.Parse() call
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	var exitedCode *int
 	params = parseCliArgs(func(exitCode int) {
 		exitedCode = new(int)
 		*exitedCode = exitCode
 	})
 	if exitedCode == nil || *exitedCode == 0 {
-		t.Fatalf("unexpected exit request: %v", exitedCode)
+		t.Fatalf("expected exit request: %v", exitedCode)
+	}
+
+	// invalid poll-interval suffix should fail
+	os.Args = []string{"icyci",
+		"--source-repo", "/source.git", "--source-branch", "test",
+		"--test-script", "/test.sh", "--results-repo", "/results.git",
+		"--poll-interval", "60y",
+	}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	exitedCode = nil
+	params = parseCliArgs(func(exitCode int) {
+		exitedCode = new(int)
+		*exitedCode = exitCode
+	})
+	if exitedCode == nil || *exitedCode == 0 {
+		t.Fatalf("expected exit request: %v", exitedCode)
+	}
+
+	// fancy poll interval
+	os.Args = []string{"icyci",
+		"--source-repo", "/source.git", "--source-branch", "test",
+		"--test-script", "/test.sh", "--results-repo", "/results.git",
+		"--poll-interval", "1h4m",
+	}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	params = parseCliArgs(func(exitCode int) {
+		t.Fatalf("unexpected exit request: %d", exitCode)
+	})
+	if params.pollInterval != time.Duration(time.Hour+4*time.Minute) {
+		t.Fatalf("unexpected pollInterval %v\n", params.pollInterval)
+	}
+
+	// negative poll interval
+	os.Args = []string{"icyci",
+		"--source-repo", "/source.git", "--source-branch", "test",
+		"--test-script", "/test.sh", "--results-repo", "/results.git",
+		"--poll-interval", "-4h",
+	}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	exitedCode = nil
+	params = parseCliArgs(func(exitCode int) {
+		exitedCode = new(int)
+		*exitedCode = exitCode
+	})
+	if exitedCode == nil || *exitedCode == 0 {
+		t.Fatalf("expected exit request: %v", exitedCode)
+	}
+
+	// long-form units for poll-interval
+	os.Args = []string{"icyci",
+		"--source-repo", "/source.git", "--source-branch", "test",
+		"--test-script", "/test.sh", "--results-repo", "/results.git",
+		"--poll-interval", "4hours",
+	}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	exitedCode = nil
+	params = parseCliArgs(func(exitCode int) {
+		exitedCode = new(int)
+		*exitedCode = exitCode
+	})
+	if exitedCode == nil || *exitedCode == 0 {
+		t.Fatalf("expected exit request: %v", exitedCode)
 	}
 }
 
@@ -1942,7 +2005,7 @@ func TestScriptSigterm(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -2003,7 +2066,7 @@ func TestBadCmd(t *testing.T) {
 		testScript:     "./does_not_exist.sh", // ENOENT
 		resultsUrl:     srurl,
 		pushSrcToRslts: true,
-		pollIntervalS:  1,
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 	emsg := "./does_not_exist.sh failed: fork/exec ./does_not_exist.sh: " +
@@ -2076,7 +2139,7 @@ func TestNotesDir(t *testing.T) {
 		testScript:     "./t.sh",
 		resultsUrl:     srurl,
 		pushSrcToRslts: true,
-		pollIntervalS:  1,
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -2154,7 +2217,7 @@ func TestStaleNotesDir(t *testing.T) {
 		testScript:     "./t.sh",
 		resultsUrl:     srurl,
 		pushSrcToRslts: true,
-		pollIntervalS:  1,
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -2253,7 +2316,7 @@ func TestSignedMerge(t *testing.T) {
 		testScript:     "./test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
@@ -2324,7 +2387,7 @@ func TestMergeSignedTag(t *testing.T) {
 		testScript:     "./test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollIntervalS:  1, // minimal
+		pollInterval:   time.Duration(time.Second),
 		notesNS:        defNotesNS,
 	}
 
