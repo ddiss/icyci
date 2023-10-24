@@ -172,7 +172,7 @@ func fileWriteUnsignedCommit(t *testing.T, sdir string, sfile string,
 }
 
 func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
-	notesChan chan<- bytes.Buffer) {
+	pollInterval time.Duration, notesChan chan<- bytes.Buffer) {
 
 	for {
 		var notesOut bytes.Buffer
@@ -200,7 +200,7 @@ func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
 			return
 		}
 
-		time.Sleep(time.Second * 1)
+		time.Sleep(pollInterval)
 	}
 }
 
@@ -228,6 +228,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
+		// HEAD tested on start; polling (with long interval) not used
 		pollInterval:   time.Duration(time.Minute),
 		notesNS:        defNotesNS,
 	}
@@ -249,7 +250,8 @@ func TestSeparateSrcRslt(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, "HEAD", notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, "HEAD",
+			time.Duration(time.Second), notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
@@ -324,7 +326,8 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
@@ -347,7 +350,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 			commitI++
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
-					curCommit, notesChan)
+					curCommit, params.pollInterval, notesChan)
 			}()
 			if !notesWaitTimer.Stop() {
 				<-notesWaitTimer.C
@@ -411,7 +414,8 @@ func TestNewHeadWhileStopped(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
@@ -450,7 +454,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 			}()
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
-					curCommit, notesChan)
+					curCommit, params.pollInterval, notesChan)
 			}()
 			if !notesWaitTimer.Stop() {
 				<-notesWaitTimer.C
@@ -541,7 +545,8 @@ func TestStopStart(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	grepChan := make(chan bool)
@@ -594,7 +599,7 @@ func TestStopStart(t *testing.T) {
 
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
-					curCommit, notesChan)
+					curCommit, params.pollInterval, notesChan)
 			}()
 			if !notesWaitTimer.Stop() {
 				<-notesWaitTimer.C
@@ -659,7 +664,8 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
@@ -686,7 +692,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 			gitCmd(t, cloneDir, "push", sdir, tagName, "mybranch:mybranch")
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
-					curCommit, notesChan)
+					curCommit, params.pollInterval, notesChan)
 			}()
 			if !notesWaitTimer.Stop() {
 				<-notesWaitTimer.C
@@ -745,7 +751,8 @@ func TestMixUnsignedSigned(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	grepChan := make(chan bool)
@@ -793,7 +800,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
-					curCommit, notesChan)
+					curCommit, params.pollInterval, notesChan)
 			}()
 			if !notesWaitTimer.Stop() {
 				<-notesWaitTimer.C
@@ -864,9 +871,9 @@ func handleSpinlk(t *testing.T, sdir string, cloneDir string,
 			// sync - remote update can't be run concurrently in the
 			// same cloneDir
 			waitNotes(t, cloneDir, stdoutNotesRef,
-				iWin.commit, iWin.notesChan)
+				iWin.commit, iWin.params.pollInterval, iWin.notesChan)
 			waitNotes(t, cloneDir, stdoutNotesRef,
-				iLost.commit, iLost.notesChan)
+				iLost.commit, iLost.params.pollInterval, iLost.notesChan)
 		}()
 		return
 	} else if !os.IsNotExist(err) {
@@ -1100,7 +1107,8 @@ func TestScriptEnv(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
@@ -1237,7 +1245,8 @@ func TestForcePushSrc(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
@@ -1263,7 +1272,7 @@ event_loop:
 
 			go func() {
 				waitNotes(t, cloneDir, stdoutNotesRef,
-					curCommit, notesChan)
+					curCommit, params.pollInterval, notesChan)
 			}()
 
 			if !notesWaitTimer.Stop() {
@@ -1321,10 +1330,10 @@ func handleSpinlkSeparateNS(t *testing.T, sdir string, cloneDir string,
 		// same cloneDir. Must check instance specific NS
 		waitNotes(t, cloneDir,
 			"refs/notes/icyci-"+iThis.id+"."+stdoutNotes,
-			iThis.commit, iThis.notesChan)
+			iThis.commit, iThis.params.pollInterval, iThis.notesChan)
 		waitNotes(t, cloneDir,
 			"refs/notes/icyci-"+iOther.id+"."+stdoutNotes,
-			iOther.commit, iOther.notesChan)
+			iOther.commit, iThis.params.pollInterval, iOther.notesChan)
 	}()
 }
 
@@ -1566,7 +1575,8 @@ func TestScriptTimeout(t *testing.T) {
 	// wait for the results git-notes to arrive from the icyCI event loop
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, failedNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, failedNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	notesWaitTimer := time.NewTimer(time.Second * 10)
@@ -1705,7 +1715,8 @@ func TestSrcReference(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, cloneDir, stdoutNotesRef, curCommit, notesChan)
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
@@ -1769,7 +1780,8 @@ func TestMirror(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, rdir, passedNotesRef, commits[0], notesChan)
+		waitNotes(t, rdir, passedNotesRef, commits[0],
+			params.pollInterval, notesChan)
 	}()
 
 	grepChan := make(chan bool)
@@ -1809,7 +1821,8 @@ func TestMirror(t *testing.T) {
 				`echo "`+strconv.Itoa(len(commits))+`"`)
 			commits = append(commits, c)
 			go func() {
-				waitNotes(t, rdir, passedNotesRef, c, notesChan)
+				waitNotes(t, rdir, passedNotesRef, c,
+					params.pollInterval, notesChan)
 			}()
 		case <-exitCmpl:
 			if !waitTimer.Stop() {
@@ -2081,7 +2094,8 @@ func TestBadCmd(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, srdir, failedNotesRef, commits[0], notesChan)
+		waitNotes(t, srdir, failedNotesRef, commits[0],
+			params.pollInterval, notesChan)
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
@@ -2103,7 +2117,8 @@ func TestBadCmd(t *testing.T) {
 			c := fileWriteSignedCommit(t, srdir, "notrun.sh", "")
 			commits = append(commits, c)
 			go func() {
-				waitNotes(t, srdir, failedNotesRef, c, notesChan)
+				waitNotes(t, srdir, failedNotesRef, c,
+					params.pollInterval, notesChan)
 			}()
 		case <-exitCmpl:
 			if !waitTimer.Stop() {
@@ -2154,7 +2169,7 @@ func TestNotesDir(t *testing.T) {
 	notesNum := 0
 	go func() {
 		waitNotes(t, srdir, "refs/notes/"+defNotesNS+"."+"extra",
-			c, notesChan)
+			c, params.pollInterval, notesChan)
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
@@ -2172,7 +2187,7 @@ func TestNotesDir(t *testing.T) {
 				expected = "hi_extra"
 				go func() {
 					waitNotes(t, srdir, stdoutNotesRef,
-						c, notesChan)
+						c, params.pollInterval, notesChan)
 				}()
 			} else if notesNum == 2 {
 				expected = "hi_stdout"
@@ -2232,7 +2247,8 @@ func TestStaleNotesDir(t *testing.T) {
 	notesNum := 0
 	notesRefPfx := "refs/notes/" + defNotesNS + "."
 	go func() {
-		waitNotes(t, srdir, notesRefPfx+"extra_1", c, notesChan)
+		waitNotes(t, srdir, notesRefPfx+"extra_1", c,
+			params.pollInterval, notesChan)
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
@@ -2252,7 +2268,7 @@ func TestStaleNotesDir(t *testing.T) {
 					"echo yo > ${ICYCI_NOTES_DIR}/extra_2")
 				go func() {
 					waitNotes(t, srdir, notesRefPfx+"extra_2",
-						c, notesChan)
+						c, params.pollInterval, notesChan)
 				}()
 			} else if notesNum == 2 {
 				// ensure previous notes aren't attached to new
@@ -2281,7 +2297,8 @@ func TestStaleNotesDir(t *testing.T) {
 			}
 			done = true
 		case <-waitTimer.C:
-			t.Fatal("timeout while waiting for notes or exit")
+			t.Fatalf("timeout while waiting for notes %d or exit",
+				notesNum + 1)
 		}
 	}
 }
@@ -2329,7 +2346,8 @@ func TestSignedMerge(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, sdir, stdoutNotesRef, "HEAD", notesChan)
+		waitNotes(t, sdir, stdoutNotesRef, "HEAD",
+			params.pollInterval, notesChan)
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
@@ -2408,7 +2426,8 @@ func TestMergeSignedTag(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, sdir, stdoutNotesRef, "HEAD", notesChan)
+		waitNotes(t, sdir, stdoutNotesRef, "HEAD",
+			params.pollInterval, notesChan)
 	}()
 
 	waitTimer := time.NewTimer(time.Second * 10)
