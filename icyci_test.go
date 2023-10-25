@@ -307,7 +307,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -394,7 +394,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -525,7 +525,7 @@ func TestStopStart(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -649,7 +649,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -731,7 +731,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -965,6 +965,7 @@ func TestMultiInstance(t *testing.T) {
 			testScript:     "./" + i.id + "_test.sh",
 			resultsUrl:     rurl,
 			pushSrcToRslts: false,
+			// FIXME intermittent failures with reduced interval
 			pollInterval:   time.Duration(time.Second),
 			notesNS:        defNotesNS,
 		}
@@ -1224,7 +1225,7 @@ func TestForcePushSrc(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: true,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -1698,7 +1699,7 @@ func TestSrcReference(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rsltsUrl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -1767,7 +1768,7 @@ func TestMirror(t *testing.T) {
 		sourceBranch:   "mybranch",
 		resultsUrl:     rurl,
 		pushSrcToRslts: true,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -2079,7 +2080,7 @@ func TestBadCmd(t *testing.T) {
 		testScript:     "./does_not_exist.sh", // ENOENT
 		resultsUrl:     srurl,
 		pushSrcToRslts: true,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 	emsg := "./does_not_exist.sh failed: fork/exec ./does_not_exist.sh: " +
@@ -2154,7 +2155,7 @@ func TestNotesDir(t *testing.T) {
 		testScript:     "./t.sh",
 		resultsUrl:     srurl,
 		pushSrcToRslts: true,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -2232,7 +2233,7 @@ func TestStaleNotesDir(t *testing.T) {
 		testScript:     "./t.sh",
 		resultsUrl:     srurl,
 		pushSrcToRslts: true,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
