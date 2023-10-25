@@ -49,37 +49,17 @@ func gpgInit(t *testing.T, tdir string) {
 		t.Fatal(err)
 	}
 
-	batchScript := `
-		%echo starting keygen
-		Key-Type: default
-		Subkey-Type: default
-		Name-Real: ` + userName + `
-		Name-Comment: test user
-		Name-Email: ` + userEmail + `
-		Expire-Date: 1d
-		%no-protection
-		%transient-key
-		%commit
-		%echo done`
-
-	// create a tempdir to use as GNUPGHOME for key import and verification
-	batchFile := path.Join(gpgDir, "/batch_script.txt")
-
-	err = ioutil.WriteFile(batchFile,
-		[]byte(batchScript), os.FileMode(0644))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := exec.Command("gpg", "--homedir", gpgDir, "--gen-key", "--batch",
-		batchFile)
+	testKeys := gpgTestKeys
+	cmd := exec.Command("gpg", "--homedir", gpgDir,
+		"--allow-secret-key-import", "--import")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdin = &testKeys
 	err = cmd.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Logf("created GPG keypair at %s with key id %s", gpgDir, userEmail)
+	t.Logf("imported GPG keypair at %s", gpgDir)
 }
 
 func gitCmd(t *testing.T, dir string, args ...string) {
@@ -2448,4 +2428,62 @@ func TestMergeSignedTag(t *testing.T) {
 			t.Fatal("timeout waiting for verification failure\n")
 		}
 	}
+}
+
+// in-memory GPG key pair created once on init(), reused by per-test gpgInit()
+var gpgTestKeys bytes.Buffer
+
+func init() {
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		log.Panic(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgDir := path.Join(tdir, "gpg")
+	os.Setenv("GNUPGHOME", gpgDir)
+
+	err = os.MkdirAll(gpgDir, 0700)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	batchScript := `
+		%echo starting keygen
+		Key-Type: default
+		Subkey-Type: default
+		Name-Real: ` + userName + `
+		Name-Comment: test user
+		Name-Email: ` + userEmail + `
+		Expire-Date: 1d
+		%no-protection
+		%transient-key
+		%commit
+		%echo done`
+
+	// create a tempdir to use as GNUPGHOME for key import and verification
+	batchFile := path.Join(gpgDir, "/batch_script.txt")
+
+	err = ioutil.WriteFile(batchFile,
+		[]byte(batchScript), os.FileMode(0644))
+	if err != nil {
+		log.Panic(err)
+	}
+
+	cmd := exec.Command("gpg", "--homedir", gpgDir, "--gen-key", "--batch",
+		batchFile)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	cmd = exec.Command("gpg", "--homedir", gpgDir, "--export-secret-keys")
+	cmd.Stdout, cmd.Stderr = &gpgTestKeys, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	log.Printf("test GPG key-pair created\n");
 }
