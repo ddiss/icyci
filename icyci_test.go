@@ -26,6 +26,7 @@ import (
 const (
 	userName  = "icyCI test"
 	userEmail = "icyci@example.com"
+	sshKeyType = "rsa"
 	// matches default ref path
 	lockNotesRef   = "refs/notes/" + defNotesNS + "." + lockNotes
 	stdoutNotesRef = "refs/notes/" + defNotesNS + "." + stdoutNotes
@@ -33,6 +34,88 @@ const (
 	passedNotesRef = "refs/notes/" + defNotesNS + "." + passedNotes
 	failedNotesRef = "refs/notes/" + defNotesNS + "." + failedNotes
 )
+
+// in-memory key-pairs created once on init(), reused by per-test gpg/sshInit()
+var gpgTestKeys bytes.Buffer
+var sshTestPubKey *bytes.Buffer
+var sshTestPrivKey *bytes.Buffer
+
+func init() {
+	os.Setenv("GIT_PAGER", "")
+
+	tdir, err := ioutil.TempDir("", "icyci-test")
+	if err != nil {
+		log.Panic(err)
+	}
+	defer os.RemoveAll(tdir)
+
+	gpgDir := path.Join(tdir, "gpg")
+	os.Setenv("GNUPGHOME", gpgDir)
+
+	err = os.MkdirAll(gpgDir, 0700)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	batchScript := `
+		%echo starting keygen
+		Key-Type: default
+		Subkey-Type: default
+		Name-Real: ` + userName + `
+		Name-Comment: test user
+		Name-Email: ` + userEmail + `
+		Expire-Date: 1d
+		%no-protection
+		%transient-key
+		%commit
+		%echo done`
+
+	// create a tempdir to use as GNUPGHOME for key import and verification
+	batchFile := path.Join(gpgDir, "/batch_script.txt")
+
+	err = ioutil.WriteFile(batchFile,
+		[]byte(batchScript), os.FileMode(0644))
+	if err != nil {
+		log.Panic(err)
+	}
+
+	cmd := exec.Command("gpg", "--homedir", gpgDir, "--gen-key", "--batch",
+		batchFile)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	cmd = exec.Command("gpg", "--homedir", gpgDir, "--export-secret-keys")
+	cmd.Stdout, cmd.Stderr = &gpgTestKeys, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	log.Printf("Test GPG key-pair created. Creating ssh key-pair...\n")
+
+	sshPriv := path.Join(gpgDir, "id_"+sshKeyType)
+	cmd = exec.Command("ssh-keygen", "-t", sshKeyType, "-f", sshPriv, "-N",
+		"", "-q", "-C", "icyci test")
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	sshPubKeyBytes, err := os.ReadFile(sshPriv + ".pub")
+	if err != nil {
+		log.Panic(err)
+	}
+	sshTestPubKey = bytes.NewBuffer(sshPubKeyBytes)
+	sshPrivKeyBytes, err := os.ReadFile(sshPriv)
+	if err != nil {
+		log.Panic(err)
+	}
+	sshTestPrivKey = bytes.NewBuffer(sshPrivKeyBytes)
+}
 
 func gpgInit(t *testing.T, tdir string) {
 	// GNUPGHOME for key import and verification
@@ -42,7 +125,6 @@ func gpgInit(t *testing.T, tdir string) {
 	// are picked up for all git operations.
 	os.Setenv("HOME", tdir)
 	os.Setenv("GNUPGHOME", gpgDir)
-	os.Setenv("GIT_PAGER", "")
 
 	err := os.MkdirAll(gpgDir, 0700)
 	if err != nil {
@@ -62,6 +144,42 @@ func gpgInit(t *testing.T, tdir string) {
 	t.Logf("imported GPG keypair at %s", gpgDir)
 }
 
+func sshInit(t *testing.T, tdir string) string {
+	os.Setenv("HOME", tdir)
+
+	sshDir := path.Join(tdir, ".ssh")
+	err := os.MkdirAll(sshDir, 0700)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privKey := path.Join(sshDir, "id_"+sshKeyType)
+	err = os.WriteFile(privKey, sshTestPrivKey.Bytes(),
+		os.FileMode(0600))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pubKey := privKey + ".pub"
+	err = os.WriteFile(pubKey, sshTestPubKey.Bytes(), os.FileMode(0644))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// see ALLOWED SIGNERS section in ssh-keygen manpage:
+	// <principals> [options] <key type> <base64 pub key>
+	// .pub contents may include a trailing comment (username) but it
+	// doesn't appear to cause any problems.
+	err = os.WriteFile(path.Join(sshDir, "allowed_signers"),
+		append([]byte(userEmail+" "), sshTestPubKey.Bytes()...),
+		os.FileMode(0644))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return sshDir
+}
+
 func gitCmd(t *testing.T, dir string, args ...string) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -72,17 +190,37 @@ func gitCmd(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func gitReposInit(t *testing.T, gitHomeDir string, repoDirs ...string) {
+func gitReposInit(t *testing.T, gitHomeDir string, sshDir *string,
+	repoDirs ...string) {
+	// initial config is appended with ssh / gpg parameters
+	gitConf := `
+[init]
+	defaultBranch = main
+[user]
+	name = `+userName+`
+	email = `+userEmail
 
-	gitCfg := path.Join(gitHomeDir, ".gitconfig")
-	err := ioutil.WriteFile(gitCfg,
-		[]byte(`[user]
-			name = `+userName+`
-		        email = `+userEmail+`
-			signingKey = <`+userEmail+`>
-			[init]
-			defaultBranch = main`),
-		os.FileMode(0644))
+	if sshDir != nil {
+		gitSigningKey := path.Join(*sshDir, "id_"+sshKeyType+".pub")
+		allowedSigners :=  path.Join(*sshDir, "allowed_signers")
+		gitConf += `
+	signingKey = `+gitSigningKey+`
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	allowedSignersFile = `+allowedSigners
+	} else {
+		// GNUPGHOME env used
+		gitConf += `
+	signingKey = <`+userEmail+`>
+[gpg]
+	format = openpgp`
+	}
+
+	t.Log(gitConf)
+
+	err := ioutil.WriteFile(path.Join(gitHomeDir, ".gitconfig"),
+		[]byte(gitConf), os.FileMode(0644))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,21 +249,15 @@ func fileWriteCommit(t *testing.T, sdir string, sfiles map[string]string,
 		gitCmd(t, sdir, "add", srcPath)
 	}
 
-	gitCmd := append([]string{"commit"}, gitCommitParams...)
-	cmd := exec.Command("git", gitCmd...)
-	cmd.Dir = sdir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	gargs := append([]string{"commit"}, gitCommitParams...)
+	gitCmd(t, sdir, gargs...)
 
 	var revParseOut bytes.Buffer
-	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = sdir
 	cmd.Stdout = &revParseOut
 	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +326,7 @@ func TestSeparateSrcRslt(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src")
 	rdir := path.Join(tdir, "test_rslt")
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, nil, sdir, rdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -209,8 +341,8 @@ func TestSeparateSrcRslt(t *testing.T) {
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
 		// HEAD tested on start; polling (with long interval) not used
-		pollInterval:   time.Duration(time.Minute),
-		notesNS:        defNotesNS,
+		pollInterval: time.Duration(time.Minute),
+		notesNS:      defNotesNS,
 	}
 
 	var wg sync.WaitGroup
@@ -272,7 +404,7 @@ func TestNewHeadSameSrcRslt(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -359,7 +491,7 @@ func TestNewHeadWhileStopped(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -490,7 +622,7 @@ func TestStopStart(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -606,7 +738,7 @@ func TestSignedTagUnsignedCommit(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 
 	// commit from clone so that we can push the tag before the new head
 	cloneDir := path.Join(tdir, "test_clone_both")
@@ -696,7 +828,7 @@ func TestMixUnsignedSigned(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -915,7 +1047,7 @@ func TestMultiInstance(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	surl, err := url.Parse(sdir)
@@ -946,8 +1078,8 @@ func TestMultiInstance(t *testing.T) {
 			resultsUrl:     rurl,
 			pushSrcToRslts: false,
 			// FIXME intermittent failures with reduced interval
-			pollInterval:   time.Duration(time.Second),
-			notesNS:        defNotesNS,
+			pollInterval: time.Duration(time.Second),
+			notesNS:      defNotesNS,
 		}
 
 		i.evSigChan = make(chan os.Signal)
@@ -1056,7 +1188,7 @@ func TestScriptEnv(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`echo "ICYCI_PID: $ICYCI_PID"`)
@@ -1121,7 +1253,7 @@ func TestScriptSignalLog(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	_ = fileWriteSignedCommit(t, sdir, "src_test.sh",
 		`kill -SIGUSR1 "$ICYCI_PID"; sleep 1`)
@@ -1190,7 +1322,7 @@ func TestForcePushSrc(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src")
 	rdir := path.Join(tdir, "test_rslt")
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, nil, sdir, rdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit := fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -1335,7 +1467,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	surl, err := url.Parse(sdir)
@@ -1518,7 +1650,7 @@ func TestScriptTimeout(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -1588,7 +1720,7 @@ func TestScriptExit(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	// touch spinlk file in loop. lack of recreation used to confirm exit.
 	spinlk := path.Join(tdir, "spinlk")
@@ -1656,7 +1788,7 @@ func TestSrcReference(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rsltsDir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	// first commit is common between source and ref repos, following clone
@@ -1734,7 +1866,7 @@ func TestMirror(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src")
 	rdir := path.Join(tdir, "test_rslt")
-	gitReposInit(t, tdir, sdir, rdir)
+	gitReposInit(t, tdir, nil, sdir, rdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 
 	commits := []string{fileWriteSignedCommit(t, sdir, "notrun.sh",
@@ -1985,7 +2117,7 @@ func TestScriptSigterm(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mybranch")
 	// long sleep used to confirm that SIGTERM results in cmd termination
 	_ = fileWriteSignedCommit(t, sdir, "src_test.sh",
@@ -2047,7 +2179,7 @@ func TestBadCmd(t *testing.T) {
 	gpgInit(t, tdir)
 
 	srdir := path.Join(tdir, "test_src_and_rslt")
-	gitReposInit(t, tdir, srdir)
+	gitReposInit(t, tdir, nil, srdir)
 	gitCmd(t, srdir, "checkout", "-b", "mybranch")
 
 	commits := []string{fileWriteSignedCommit(t, srdir, "notrun.sh",
@@ -2119,7 +2251,7 @@ func TestNotesDir(t *testing.T) {
 	gpgInit(t, tdir)
 
 	srdir := path.Join(tdir, "test_src_and_rslt")
-	gitReposInit(t, tdir, srdir)
+	gitReposInit(t, tdir, nil, srdir)
 	gitCmd(t, srdir, "checkout", "-b", "mybranch")
 
 	c := fileWriteSignedCommit(t, srdir, "t.sh",
@@ -2197,7 +2329,7 @@ func TestStaleNotesDir(t *testing.T) {
 	gpgInit(t, tdir)
 
 	srdir := path.Join(tdir, "test_src_and_rslt")
-	gitReposInit(t, tdir, srdir)
+	gitReposInit(t, tdir, nil, srdir)
 	gitCmd(t, srdir, "checkout", "-b", "mybranch")
 
 	c := fileWriteSignedCommit(t, srdir, "t.sh",
@@ -2279,7 +2411,7 @@ func TestStaleNotesDir(t *testing.T) {
 			done = true
 		case <-waitTimer.C:
 			t.Fatalf("timeout while waiting for notes %d or exit",
-				notesNum + 1)
+				notesNum+1)
 		}
 	}
 }
@@ -2293,7 +2425,7 @@ func TestSignedMerge(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mergedst")
 
 	fileWriteUnsignedCommit(t, sdir, "test.sh",
@@ -2364,7 +2496,7 @@ func TestMergeSignedTag(t *testing.T) {
 
 	sdir := path.Join(tdir, "test_src_and_rslt")
 	rdir := sdir
-	gitReposInit(t, tdir, sdir)
+	gitReposInit(t, tdir, nil, sdir)
 	gitCmd(t, sdir, "checkout", "-b", "mergedst")
 
 	fileWriteUnsignedCommit(t, sdir, "test.sh",
@@ -2428,62 +2560,4 @@ func TestMergeSignedTag(t *testing.T) {
 			t.Fatal("timeout waiting for verification failure\n")
 		}
 	}
-}
-
-// in-memory GPG key pair created once on init(), reused by per-test gpgInit()
-var gpgTestKeys bytes.Buffer
-
-func init() {
-	tdir, err := ioutil.TempDir("", "icyci-test")
-	if err != nil {
-		log.Panic(err)
-	}
-	defer os.RemoveAll(tdir)
-
-	gpgDir := path.Join(tdir, "gpg")
-	os.Setenv("GNUPGHOME", gpgDir)
-
-	err = os.MkdirAll(gpgDir, 0700)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	batchScript := `
-		%echo starting keygen
-		Key-Type: default
-		Subkey-Type: default
-		Name-Real: ` + userName + `
-		Name-Comment: test user
-		Name-Email: ` + userEmail + `
-		Expire-Date: 1d
-		%no-protection
-		%transient-key
-		%commit
-		%echo done`
-
-	// create a tempdir to use as GNUPGHOME for key import and verification
-	batchFile := path.Join(gpgDir, "/batch_script.txt")
-
-	err = ioutil.WriteFile(batchFile,
-		[]byte(batchScript), os.FileMode(0644))
-	if err != nil {
-		log.Panic(err)
-	}
-
-	cmd := exec.Command("gpg", "--homedir", gpgDir, "--gen-key", "--batch",
-		batchFile)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		log.Panic(err)
-	}
-
-	cmd = exec.Command("gpg", "--homedir", gpgDir, "--export-secret-keys")
-	cmd.Stdout, cmd.Stderr = &gpgTestKeys, os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		log.Panic(err)
-	}
-
-	log.Printf("test GPG key-pair created\n");
 }
