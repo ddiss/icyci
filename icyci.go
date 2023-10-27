@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
-// Copyright (C) 2019-2022 SUSE LLC
+// Copyright (C) 2019-2023 SUSE LLC
 
 package main
 
@@ -10,7 +10,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
@@ -378,7 +377,7 @@ func awaitCommand(ch chan<- runCmdState, exitCh chan error, cmdPath string,
 		summaryP = path.Join(notesDir, failedNotes)
 	}
 	log.Print(msg + "\n")
-	err = ioutil.WriteFile(summaryP, []byte(msg), os.FileMode(0644))
+	err = os.WriteFile(summaryP, []byte(msg), os.FileMode(0644))
 	if err != nil {
 		goto err_out
 	}
@@ -956,7 +955,7 @@ func main() {
 	}
 
 	// create a directory to use for staging source, etc.
-	wdir, err := ioutil.TempDir("", "icyci-workspace")
+	wdir, err := os.MkdirTemp("", "icyci-workspace")
 	if err != nil {
 		log.Panic(err)
 	}
