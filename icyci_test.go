@@ -283,28 +283,30 @@ func fileWriteUnsignedCommit(t *testing.T, sdir string, sfile string,
 	return curRev
 }
 
-func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
-	pollInterval time.Duration, notesChan chan<- bytes.Buffer) {
+func _waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
+	pollInterval time.Duration, fetch bool, notesChan chan<- bytes.Buffer) {
 
 	for {
 		var notesOut bytes.Buffer
 
-		t.Logf("updating remotes")
-		cmd := exec.Command("git", "remote", "update")
-		cmd.Dir = repoDir
-		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		err := cmd.Run()
-		if err != nil {
-			t.Fatal(err)
+		if fetch {
+			t.Logf("updating remotes")
+			cmd := exec.Command("git", "remote", "update")
+			cmd.Dir = repoDir
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			err := cmd.Run()
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		t.Logf("checking notes at %s", srcRef)
-		cmd = exec.Command("git", "notes", "--ref="+notesRef, "show",
+		cmd := exec.Command("git", "notes", "--ref="+notesRef, "show",
 			"--", srcRef)
 		cmd.Dir = repoDir
 		cmd.Stdout = &notesOut
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+		err := cmd.Run()
 		if err == nil {
 			// notes arrived, notify
 			t.Logf("notes ready!")
@@ -314,6 +316,17 @@ func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
 
 		time.Sleep(pollInterval)
 	}
+}
+
+func waitNotes(t *testing.T, repoDir string, notesRef string, srcRef string,
+	pollInterval time.Duration, notesChan chan<- bytes.Buffer) {
+	_waitNotes(t, repoDir, notesRef, srcRef, pollInterval, true, notesChan)
+}
+
+// don't update remotes while waiting for notes to appear
+func waitNotesLocal(t *testing.T, repoDir string, notesRef string, srcRef string,
+	pollInterval time.Duration, notesChan chan<- bytes.Buffer) {
+	_waitNotes(t, repoDir, notesRef, srcRef, pollInterval, false, notesChan)
 }
 
 // Simple test for (mostly) default case:
@@ -1893,7 +1906,7 @@ func TestMirror(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, rdir, passedNotesRef, commits[0],
+		waitNotesLocal(t, rdir, passedNotesRef, commits[0],
 			params.pollInterval, notesChan)
 	}()
 
@@ -1934,7 +1947,7 @@ func TestMirror(t *testing.T) {
 				`echo "`+strconv.Itoa(len(commits))+`"`)
 			commits = append(commits, c)
 			go func() {
-				waitNotes(t, rdir, passedNotesRef, c,
+				waitNotesLocal(t, rdir, passedNotesRef, c,
 					params.pollInterval, notesChan)
 			}()
 		case <-exitCmpl:
@@ -2207,7 +2220,7 @@ func TestBadCmd(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, srdir, failedNotesRef, commits[0],
+		waitNotesLocal(t, srdir, failedNotesRef, commits[0],
 			params.pollInterval, notesChan)
 	}()
 
@@ -2230,7 +2243,7 @@ func TestBadCmd(t *testing.T) {
 			c := fileWriteSignedCommit(t, srdir, "notrun.sh", "")
 			commits = append(commits, c)
 			go func() {
-				waitNotes(t, srdir, failedNotesRef, c,
+				waitNotesLocal(t, srdir, failedNotesRef, c,
 					params.pollInterval, notesChan)
 			}()
 		case <-exitCmpl:
@@ -2281,7 +2294,7 @@ func TestNotesDir(t *testing.T) {
 	notesChan := make(chan bytes.Buffer)
 	notesNum := 0
 	go func() {
-		waitNotes(t, srdir, "refs/notes/"+defNotesNS+"."+"extra",
+		waitNotesLocal(t, srdir, "refs/notes/"+defNotesNS+"."+"extra",
 			c, params.pollInterval, notesChan)
 	}()
 
@@ -2299,7 +2312,7 @@ func TestNotesDir(t *testing.T) {
 			if notesNum == 1 {
 				expected = "hi_extra"
 				go func() {
-					waitNotes(t, srdir, stdoutNotesRef,
+					waitNotesLocal(t, srdir, stdoutNotesRef,
 						c, params.pollInterval, notesChan)
 				}()
 			} else if notesNum == 2 {
@@ -2360,7 +2373,7 @@ func TestStaleNotesDir(t *testing.T) {
 	notesNum := 0
 	notesRefPfx := "refs/notes/" + defNotesNS + "."
 	go func() {
-		waitNotes(t, srdir, notesRefPfx+"extra_1", c,
+		waitNotesLocal(t, srdir, notesRefPfx+"extra_1", c,
 			params.pollInterval, notesChan)
 	}()
 
@@ -2380,7 +2393,7 @@ func TestStaleNotesDir(t *testing.T) {
 				c = fileWriteSignedCommit(t, srdir, "t.sh",
 					"echo yo > ${ICYCI_NOTES_DIR}/extra_2")
 				go func() {
-					waitNotes(t, srdir, notesRefPfx+"extra_2",
+					waitNotesLocal(t, srdir, notesRefPfx+"extra_2",
 						c, params.pollInterval, notesChan)
 				}()
 			} else if notesNum == 2 {
@@ -2459,7 +2472,7 @@ func TestSignedMerge(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, sdir, stdoutNotesRef, "HEAD",
+		waitNotesLocal(t, sdir, stdoutNotesRef, "HEAD",
 			params.pollInterval, notesChan)
 	}()
 
@@ -2539,7 +2552,7 @@ func TestMergeSignedTag(t *testing.T) {
 
 	notesChan := make(chan bytes.Buffer)
 	go func() {
-		waitNotes(t, sdir, stdoutNotesRef, "HEAD",
+		waitNotesLocal(t, sdir, stdoutNotesRef, "HEAD",
 			params.pollInterval, notesChan)
 	}()
 
