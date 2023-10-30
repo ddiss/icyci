@@ -2574,3 +2574,258 @@ func TestMergeSignedTag(t *testing.T) {
 		}
 	}
 }
+
+// confirm that ssh signatures can also be used with commits and tags
+func TestSshSigs(t *testing.T) {
+	tdir := t.TempDir()
+	sshDir := sshInit(t, tdir)
+
+	srdir := path.Join(tdir, "test_src_and_rslt")
+	gitReposInit(t, tdir, &sshDir, srdir)
+	gitCmd(t, srdir, "checkout", "-b", "mybranch")
+
+	c := fileWriteSignedCommit(t, srdir, "t.sh", "echo hi")
+
+	srurl, err := url.Parse(srdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := cliParams{
+		sourceUrl:      srurl,
+		sourceBranch:   "mybranch",
+		testScript:     "./t.sh",
+		resultsUrl:     srurl,
+		pushSrcToRslts: true,
+		pollInterval:   time.Duration(300 * time.Millisecond),
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	notesChan := make(chan bytes.Buffer)
+	notesNum := 0
+	go func() {
+		waitNotesLocal(t, srdir, stdoutNotesRef, c,
+			params.pollInterval, notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for done := false; !done; {
+		var expected string
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			notesNum++
+			t.Logf("notes %d arrived\n", notesNum)
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if notesNum == 1 {
+				expected = "hi"
+				c = fileWriteSignedCommit(t, srdir, "t.sh",
+					"echo yo")
+				go func() {
+					waitNotesLocal(t, srdir, stdoutNotesRef,
+						c, params.pollInterval, notesChan)
+				}()
+			} else if notesNum == 2 {
+				expected = "yo"
+				evSigChan <- syscall.SIGTERM
+			}
+			if snotes != expected {
+				t.Fatalf("%s does not match expected %s\n",
+					snotes, expected)
+			}
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatalf("timeout while waiting for notes %d or exit",
+				notesNum+1)
+		}
+	}
+}
+
+// unsigned HEAD, with ssh signed tag
+func TestSshSignedTags(t *testing.T) {
+	var commitI int = 0
+	var curCommit string
+	const maxCommitI int = 3
+
+	tdir := t.TempDir()
+	sshDir := sshInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	gitReposInit(t, tdir, &sshDir, sdir)
+
+	// commit from clone so that we can push the tag alongside new head
+	cloneDir := path.Join(tdir, "test_clone_both")
+	gitCmd(t, tdir, "clone", "--config",
+		"remote.origin.fetch=refs/notes/*:refs/notes/*", sdir, cloneDir)
+	gitCmd(t, cloneDir, "checkout", "-b", "mybranch")
+
+	curCommit = fileWriteUnsignedCommit(t, cloneDir, "src_test.sh",
+		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
+	commitI++
+
+	tagName := "mytag" + strconv.Itoa(commitI)
+	gitCmd(t, cloneDir, "tag", "-s", "-m", "signed tag", tagName)
+	gitCmd(t, cloneDir, "push", sdir, tagName, "mybranch:mybranch")
+
+	surl, _ := url.Parse(sdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     surl,
+		pushSrcToRslts: false,
+		pollInterval:   time.Duration(300 * time.Millisecond),
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotes(t, cloneDir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for done := false; !done; {
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			if commitI == maxCommitI {
+				evSigChan <- syscall.SIGTERM
+				continue
+			}
+			curCommit = fileWriteUnsignedCommit(
+				t, cloneDir, "src_test.sh",
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
+			commitI++
+
+			tagName = "mytag" + strconv.Itoa(commitI)
+			gitCmd(t, cloneDir, "tag", "-s", "-m", "signed tag", tagName)
+			gitCmd(t, cloneDir, "push", sdir, tagName, "mybranch:mybranch")
+			go func() {
+				waitNotes(t, cloneDir, stdoutNotesRef,
+					curCommit, params.pollInterval, notesChan)
+			}()
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}
+
+// confirm that it's possible to verify both GPG and ssh signatures in the same
+// repository.
+func TestSshMixedWithGpg(t *testing.T) {
+	var commitI int = 0
+	var curCommit string
+	const maxCommitI int = 3
+
+	tdir := t.TempDir()
+	// init both ssh and GPG keys
+	gpgInit(t, tdir)
+	sshDir := sshInit(t, tdir)
+
+	sdir := path.Join(tdir, "test_src_and_rslt")
+	// nil sshDir: use gpg initially
+	gitReposInit(t, tdir, nil, sdir)
+	gitCmd(t, sdir, "checkout", "-b", "mybranch")
+
+	curCommit = fileWriteSignedCommit(t, sdir, "src_test.sh",
+		`echo "commitI: `+strconv.Itoa(commitI)+`"`)
+	commitI++
+
+	// rewrite .gitconfig with sshDir: switch to ssh signing, but GPG
+	// signatures should still be verifiable.
+	gitReposInit(t, tdir, &sshDir)
+
+	surl, _ := url.Parse(sdir)
+	params := cliParams{
+		sourceUrl:      surl,
+		sourceBranch:   "mybranch",
+		testScript:     "./src_test.sh",
+		resultsUrl:     surl,
+		pushSrcToRslts: false,
+		pollInterval:   time.Duration(300 * time.Millisecond),
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	// wait for the results git-notes to arrive from the icyCI event loop
+	notesChan := make(chan bytes.Buffer)
+	go func() {
+		waitNotesLocal(t, sdir, stdoutNotesRef, curCommit,
+			params.pollInterval, notesChan)
+	}()
+
+	waitTimer := time.NewTimer(time.Second * 10)
+	for done := false; !done; {
+		select {
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			waitTimer.Reset(time.Second * 10)
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			if snotes != "commitI: "+strconv.Itoa(commitI-1) {
+				t.Fatalf("%s does not match expected\n", snotes)
+			}
+			if commitI == maxCommitI {
+				evSigChan <- syscall.SIGTERM
+				continue
+			}
+			curCommit = fileWriteSignedCommit(
+				t, sdir, "src_test.sh",
+				`echo "commitI: `+strconv.Itoa(commitI)+`"`)
+			commitI++
+
+			go func() {
+				waitNotesLocal(t, sdir, stdoutNotesRef,
+					curCommit, params.pollInterval, notesChan)
+			}()
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		case <-waitTimer.C:
+			t.Fatal("timeout while waiting for icyCI notes\n")
+		}
+	}
+}

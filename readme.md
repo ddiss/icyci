@@ -12,7 +12,7 @@ It differs from other CI utilities in a few ways:
 | What?          | How?                                                        |
 | -------------- | ----------------------------------------------------------- |
 | Lightweight    | Single Go binary with a Git core tools dependency.          |
-| Secure         | Only proceeds if branch GPG signature can be verified.      |
+| Secure         | Only proceeds if branch GPG/ssh signature can be verified.  |
 | Trustless      | Doesn't need push access to source repositories. Rootless.  |
 | Vendor Neutral | Only relies on standard Git features and protocols.         |
 | Fast           | Asynchronous, event based architecture.                     |
@@ -133,7 +133,6 @@ Future
 - Support multiple branches within one instance
 - push results as static website, in addition to git-notes
 - Periodically push progress while testing
-- SSH key based git signature verification
 - Your feature; please raise requests via the issue tracker
 
 
