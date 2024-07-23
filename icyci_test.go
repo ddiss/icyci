@@ -59,8 +59,10 @@ func init() {
 
 	batchScript := `
 		%echo starting keygen
-		Key-Type: default
-		Subkey-Type: default
+		Key-Type: EDDSA
+		Key-Curve: ed25519
+		Subkey-Type: ECDH
+		Subkey-Curve: cv25519
 		Name-Real: ` + userName + `
 		Name-Comment: test user
 		Name-Email: ` + userEmail + `
