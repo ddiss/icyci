@@ -487,6 +487,9 @@ func pushResults(ch chan<- error, sourceDir string,
 
 		for _, gitArgs := range gitNotesAddCmds {
 			cmd := exec.Command("git", gitArgs...)
+			// https://github.com/ddiss/icyci/issues/12 : git may
+			// start an editor for empty notes, so use /bin/true.
+			cmd.Env = append(os.Environ(), "GIT_EDITOR=true")
 			cmd.Dir = sourceDir
 			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 			err = cmd.Run()
