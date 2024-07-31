@@ -591,7 +591,7 @@ func pollSource(retCh chan<- error, exitCh chan error, sourceDir string,
 			goto err_out
 
 		case <-pollTimer.C:
-			pollTimer.Reset(time.Second * time.Duration(pollInterval))
+			pollTimer.Reset(pollInterval)
 
 			err = pollFetch(sourceDir, branch)
 			if err != nil {
