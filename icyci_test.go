@@ -1740,7 +1740,7 @@ func TestScriptExit(t *testing.T) {
 	// touch spinlk file in loop. lack of recreation used to confirm exit.
 	spinlk := path.Join(tdir, "spinlk")
 	fileWriteSignedCommit(t, sdir, "src_test.sh",
-		"while true; do touch "+spinlk+"; fsync "+spinlk+"; sleep 0.5; done")
+		"while true; do touch "+spinlk+"; sync "+spinlk+"; sleep 0.5; done")
 
 	go func() {
 		waitSpinlk(t, spinlk, spinlkChan)
