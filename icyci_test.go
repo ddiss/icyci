@@ -1092,9 +1092,8 @@ func TestMultiInstance(t *testing.T) {
 			testScript:     "./" + i.id + "_test.sh",
 			resultsUrl:     rurl,
 			pushSrcToRslts: false,
-			// FIXME intermittent failures with reduced interval
-			pollInterval: time.Duration(time.Second),
-			notesNS:      defNotesNS,
+			pollInterval:   time.Duration(300 * time.Millisecond),
+			notesNS:        defNotesNS,
 		}
 
 		i.evSigChan = make(chan os.Signal)
@@ -1216,7 +1215,7 @@ func TestScriptEnv(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -1281,7 +1280,7 @@ func TestScriptSignalLog(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -1511,7 +1510,7 @@ func TestMultiInstanceSeparateNS(t *testing.T) {
 			testScript:     "./" + i.id + "_test.sh",
 			resultsUrl:     rurl,
 			pushSrcToRslts: false,
-			pollInterval:   time.Duration(time.Second),
+			pollInterval:   time.Duration(300 * time.Millisecond),
 			notesNS:        "icyci-" + i.id,
 		}
 
@@ -1684,7 +1683,7 @@ func TestScriptTimeout(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -1754,7 +1753,7 @@ func TestScriptExit(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -2146,7 +2145,7 @@ func TestScriptSigterm(t *testing.T) {
 		testScript:     "./src_test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -2461,7 +2460,7 @@ func TestSignedMerge(t *testing.T) {
 		testScript:     "./test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
@@ -2533,7 +2532,7 @@ func TestMergeSignedTag(t *testing.T) {
 		testScript:     "./test.sh",
 		resultsUrl:     rurl,
 		pushSrcToRslts: false,
-		pollInterval:   time.Duration(time.Second),
+		pollInterval:   time.Duration(300 * time.Millisecond),
 		notesNS:        defNotesNS,
 	}
 
