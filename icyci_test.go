@@ -2831,3 +2831,82 @@ func TestSshMixedWithGpg(t *testing.T) {
 		}
 	}
 }
+
+// Explicit regression test for https://github.com/ddiss/icyci/issues/13 where
+// pollTimer.Reset() used a bogus (extremely long) duration.
+// - push unsigned head
+// - start background icyci event loop
+// - sleep 2xpollInterval
+// - push signed head and await notes
+func TestAwaitPollReset(t *testing.T) {
+	tdir := t.TempDir()
+	gpgInit(t, tdir)
+
+	srdir := path.Join(tdir, "test_src_and_rslt")
+	gitReposInit(t, tdir, nil, srdir)
+	gitCmd(t, srdir, "checkout", "-b", "mybranch")
+
+	fileWriteUnsignedCommit(t, srdir, "t.sh", "echo not_tested")
+
+	srurl, err := url.Parse(srdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := cliParams{
+		sourceUrl:      srurl,
+		sourceBranch:   "mybranch",
+		testScript:     "./t.sh",
+		resultsUrl:     srurl,
+		pushSrcToRslts: false,
+		pollInterval:   time.Duration(300 * time.Millisecond),
+		notesNS:        defNotesNS,
+	}
+
+	evSigChan := make(chan os.Signal)
+	exitCmpl := make(chan int)
+	go func() {
+		eventLoop(&params, tdir, evSigChan)
+		exitCmpl <- 1
+	}()
+
+	notesChan := make(chan bytes.Buffer)
+
+	sleepBeforeCommit := 2 * params.pollInterval
+	t.Logf("icyci started with %v pollInterval. Waiting %v for repoll.\n",
+		params.pollInterval, sleepBeforeCommit)
+	waitTimer := time.NewTimer(sleepBeforeCommit)
+	for done := false; !done; {
+		var expected string
+		select {
+		case <-waitTimer.C:
+			if sleepBeforeCommit == 0 {
+				t.Fatal("timeout while waiting for notes or exit")
+			}
+			sleepBeforeCommit = 0
+			c := fileWriteSignedCommit(t, srdir, "t.sh",
+				"echo hi_stdout")
+			go func() {
+				waitNotesLocal(t, srdir, stdoutNotesRef,
+					c, params.pollInterval, notesChan)
+			}()
+			waitTimer.Reset(time.Second * 10)
+		case notes := <-notesChan:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			snotes := string(bytes.TrimRight(notes.Bytes(), "\n"))
+			expected = "hi_stdout"
+			evSigChan <- syscall.SIGTERM
+			if snotes != expected {
+				t.Fatalf("Note %s does not match expected %s\n",
+					snotes, expected)
+			}
+			waitTimer.Reset(time.Second * 10)
+		case <-exitCmpl:
+			if !waitTimer.Stop() {
+				<-waitTimer.C
+			}
+			done = true
+		}
+	}
+}
