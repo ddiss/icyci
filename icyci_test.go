@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	userName  = "icyCI test"
-	userEmail = "icyci@example.com"
+	userName   = "icyCI test"
+	userEmail  = "icyci@example.com"
 	sshKeyType = "rsa"
 	// matches default ref path
 	lockNotesRef   = "refs/notes/" + defNotesNS + "." + lockNotes
@@ -199,22 +199,22 @@ func gitReposInit(t *testing.T, gitHomeDir string, sshDir *string,
 [init]
 	defaultBranch = main
 [user]
-	name = `+userName+`
-	email = `+userEmail
+	name = ` + userName + `
+	email = ` + userEmail
 
 	if sshDir != nil {
 		gitSigningKey := path.Join(*sshDir, "id_"+sshKeyType+".pub")
-		allowedSigners :=  path.Join(*sshDir, "allowed_signers")
+		allowedSigners := path.Join(*sshDir, "allowed_signers")
 		gitConf += `
-	signingKey = `+gitSigningKey+`
+	signingKey = ` + gitSigningKey + `
 [gpg]
 	format = ssh
 [gpg "ssh"]
-	allowedSignersFile = `+allowedSigners
+	allowedSignersFile = ` + allowedSigners
 	} else {
 		// GNUPGHOME env used
 		gitConf += `
-	signingKey = <`+userEmail+`>
+	signingKey = <` + userEmail + `>
 [gpg]
 	format = openpgp`
 	}
